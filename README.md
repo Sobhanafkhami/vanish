@@ -28,6 +28,6 @@ npm run tauri dev
 npm run build:app
 ```
 
-Outputs: `src-tauri/target/release/vanish.exe` (portable; needs sing-box in `%APPDATA%pp.vanish.clientin\` or next to it), plus NSIS and MSI installers in `src-tauri/target/release/bundle/` which ship sing-box inside.
+Outputs: `src-tauri/target/release/vanish.exe` (portable; needs sing-box in `%APPDATA%\app.vanish.client\bin\` or next to it), plus NSIS and MSI installers in `src-tauri/target/release/bundle/` which ship sing-box inside.
 
-Core lookup order: `core_path` setting, app-data `bin/`, bundled resources, next to the exe, `PATH`. If the configured ports are taken (e.g. by Nekoray) Vanish picks free ones automatically. TUN mode needs administrator/root privileges. Data lives in `%APPDATA%pp.vanish.client` (`nodes.json`, `settings.json`); only one instance can run.
+Core lookup order: `core_path` setting, app-data `bin/`, bundled resources, next to the exe, `PATH`. If the configured ports are taken (e.g. by Nekoray) Vanish picks free ones automatically. TUN mode needs administrator/root privileges. Data lives in `%APPDATA%\app.vanish.client` (`nodes.json`, `settings.json`); only one instance can run.
