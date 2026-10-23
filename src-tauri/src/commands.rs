@@ -14,6 +14,22 @@ pub struct ImportResult {
     pub errors: Vec<String>,
 }
 
+/// Selects the first node when nothing is selected yet, so a fresh import is immediately connectable.
+fn ensure_selection(state: &AppState) -> Result<(), String> {
+    let first = state.nodes.lock().unwrap().first().map(|n| n.id.clone());
+    let changed = {
+        let mut s = state.settings.lock().unwrap();
+        let valid = s.selected_node.as_ref().is_some_and(|id| state.nodes.lock().unwrap().iter().any(|n| &n.id == id));
+        if !valid && first.is_some() {
+            s.selected_node = first;
+            true
+        } else {
+            false
+        }
+    };
+    if changed { state.save_settings() } else { Ok(()) }
+}
+
 #[tauri::command]
 pub fn list_nodes(state: State<'_, AppState>) -> Vec<Node> {
     state.nodes.lock().unwrap().clone()
@@ -25,6 +41,7 @@ pub fn import_text(text: String, state: State<'_, AppState>) -> Result<ImportRes
     let added = parsed.len();
     state.nodes.lock().unwrap().extend(parsed);
     state.save_nodes()?;
+    ensure_selection(&state)?;
     Ok(ImportResult { added, errors })
 }
 
@@ -58,6 +75,7 @@ pub async fn import_subscription(url: String, state: State<'_, AppState>) -> Res
         nodes.extend(parsed);
     }
     state.save_nodes()?;
+    ensure_selection(&state)?;
     Ok(ImportResult { added, errors })
 }
 
@@ -165,8 +183,8 @@ pub async fn http_ping(state: State<'_, AppState>) -> Result<u32, String> {
         return Err("connect first to measure real HTTP latency".into());
     }
     let (port, url) = {
-        let s = state.settings.lock().unwrap();
-        (s.mixed_port, s.ping_url.clone())
+        let ping_url = state.settings.lock().unwrap().ping_url.clone();
+        (state.active_ports.lock().unwrap().0, ping_url)
     };
     let ms = engine::http_ping(port, &url).await?;
     if let Some(id) = state.active_node.lock().unwrap().clone() {

@@ -35,12 +35,29 @@ fn binary_name() -> &'static str {
     if cfg!(windows) { "sing-box.exe" } else { "sing-box" }
 }
 
-fn resolve_binary(state: &AppState) -> PathBuf {
+/// Lookup order: explicit `core_path`, app data `bin/`, bundled resource, next to the exe, PATH.
+fn resolve_binary(app: &AppHandle, state: &AppState) -> PathBuf {
     if let Some(p) = state.settings.lock().unwrap().core_path.clone().filter(|p| !p.is_empty()) {
         return p.into();
     }
-    let local = state.data_dir.join("bin").join(binary_name());
-    if local.exists() { local } else { binary_name().into() } // fall back to PATH
+    let mut candidates = vec![state.data_dir.join("bin").join(binary_name())];
+    if let Ok(res) = app.path().resource_dir() {
+        candidates.push(res.join("binaries").join(binary_name()));
+        candidates.push(res.join(binary_name()));
+    }
+    if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.to_path_buf())) {
+        candidates.push(dir.join("binaries").join(binary_name()));
+        candidates.push(dir.join(binary_name()));
+    }
+    candidates.into_iter().find(|c| c.exists()).unwrap_or_else(|| binary_name().into())
+}
+
+fn free_port(preferred: u16, avoid: Option<u16>) -> u16 {
+    let ok = |p: u16| Some(p) != avoid && std::net::TcpListener::bind(("127.0.0.1", p)).is_ok();
+    if ok(preferred) {
+        return preferred;
+    }
+    std::net::TcpListener::bind(("127.0.0.1", 0)).and_then(|l| l.local_addr()).map(|a| a.port()).unwrap_or(preferred)
 }
 
 pub fn status(app: &AppHandle) -> CoreStatus {
@@ -60,7 +77,12 @@ pub async fn start(app: &AppHandle) -> Result<CoreStatus, String> {
         return Err("core is already running".into());
     }
 
-    let settings = state.settings.lock().unwrap().clone();
+    let mut settings = state.settings.lock().unwrap().clone();
+    // Other proxy apps (Nekoray, v2rayN...) like 2080/7890/9090: fall back to a free port instead of failing.
+    settings.mixed_port = free_port(settings.mixed_port, None);
+    settings.api_port = free_port(settings.api_port, Some(settings.mixed_port));
+    *state.active_ports.lock().unwrap() = (settings.mixed_port, settings.api_port);
+
     if settings.engine == Engine::Xray {
         return Err("xray-core fallback is not implemented yet; switch engine to sing-box".into());
     }
@@ -74,7 +96,7 @@ pub async fn start(app: &AppHandle) -> Result<CoreStatus, String> {
     let cfg = serde_json::to_vec_pretty(&config::build(&node, &settings)).map_err(|e| e.to_string())?;
     std::fs::write(&cfg_path, cfg).map_err(|e| e.to_string())?;
 
-    let bin = resolve_binary(&state);
+    let bin = resolve_binary(app, &state);
     let mut cmd = Command::new(&bin);
     cmd.args(["run", "-c"])
         .arg(&cfg_path)

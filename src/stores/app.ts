@@ -101,6 +101,7 @@ export async function importInput(text: string): Promise<string> {
   const t = text.trim();
   const res = await guarded(() => (/^https?:\/\//i.test(t) && !t.includes("\n") ? api.importSubscription(t) : api.importText(t)));
   await refreshNodes();
+  store.settings = await api.getSettings(); // import may have auto-selected a node
   if (!res) return store.error;
   return `Imported ${res.added} node(s)` + (res.errors.length ? `, ${res.errors.length} skipped` : "");
 }
