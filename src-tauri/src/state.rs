@@ -42,8 +42,8 @@ impl Default for Settings {
         Self {
             mode: Mode::SystemProxy,
             engine: Engine::SingBox,
-            mixed_port: 2080,
-            api_port: 9090,
+            mixed_port: 17890,
+            api_port: 19090,
             core_path: None,
             selected_node: None,
             ping_url: "https://www.gstatic.com/generate_204".into(),
@@ -58,13 +58,29 @@ pub struct AppState {
     pub child: tokio::sync::Mutex<Option<Child>>,
     pub traffic_task: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
     pub active_node: Mutex<Option<String>>,
+    /// (mixed, api) ports of the running core; may differ from settings if those were busy.
+    pub active_ports: Mutex<(u16, u16)>,
 }
 
+/// Missing file -> default. Unreadable/corrupt file -> default, but the original is kept as
+/// `<name>.corrupt` so a bad parse can never be silently overwritten by the next save.
 fn read_json<T: for<'de> Deserialize<'de> + Default>(path: &Path) -> T {
-    fs::read(path)
-        .ok()
-        .and_then(|b| serde_json::from_slice(&b).ok())
-        .unwrap_or_default()
+    let Ok(bytes) = fs::read(path) else { return T::default() };
+    match serde_json::from_slice(&bytes) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("failed to parse {}: {e}", path.display());
+            let _ = fs::rename(path, path.with_extension("json.corrupt"));
+            T::default()
+        }
+    }
+}
+
+/// Write-then-rename so a crash mid-write cannot truncate the existing file.
+fn write_atomic(path: &Path, data: &[u8]) -> Result<(), String> {
+    let tmp = path.with_extension("json.tmp");
+    fs::write(&tmp, data).map_err(|e| e.to_string())?;
+    fs::rename(&tmp, path).map_err(|e| e.to_string())
 }
 
 impl AppState {
@@ -78,16 +94,17 @@ impl AppState {
             child: tokio::sync::Mutex::new(None),
             traffic_task: Mutex::new(None),
             active_node: Mutex::new(None),
+            active_ports: Mutex::new((0, 0)),
         }
     }
 
     pub fn save_nodes(&self) -> Result<(), String> {
         let json = serde_json::to_vec_pretty(&*self.nodes.lock().unwrap()).map_err(|e| e.to_string())?;
-        fs::write(self.data_dir.join("nodes.json"), json).map_err(|e| e.to_string())
+        write_atomic(&self.data_dir.join("nodes.json"), &json)
     }
 
     pub fn save_settings(&self) -> Result<(), String> {
         let json = serde_json::to_vec_pretty(&*self.settings.lock().unwrap()).map_err(|e| e.to_string())?;
-        fs::write(self.data_dir.join("settings.json"), json).map_err(|e| e.to_string())
+        write_atomic(&self.data_dir.join("settings.json"), &json)
     }
 }

@@ -11,6 +11,9 @@ use tauri::{Manager, WindowEvent};
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // A second launch must not spawn a second process: two instances would fight over
+        // the data files and the sing-box ports. Focus the running one instead.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| tray::show_main(app)))
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(dir.join("bin"))?;
