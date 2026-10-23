@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "fetch-core": "node scripts/fetch-core.mjs",
+    "build:app": "npm run fetch-core && tauri build"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.1.1",

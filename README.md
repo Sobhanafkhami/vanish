@@ -14,11 +14,20 @@ Not done yet: xray-core fallback (engine switch exists but returns an error), ma
 
 ## Run
 
-Requirements: Node 20+, Rust toolchain, [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/), and a `sing-box` binary (>= 1.11) placed in `<app data dir>/bin/` (e.g. `%APPDATA%\app.vanish.client\bin\sing-box.exe`), on `PATH`, or set via `core_path` in settings.
+Requirements: Node 20+, Rust toolchain, [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) (on Windows: MSVC Build Tools).
 
 ```bash
 npm install
+npm run fetch-core   # downloads the official sing-box 1.14.x into src-tauri/binaries (bundled into the app)
 npm run tauri dev
 ```
 
-TUN mode needs administrator/root privileges. The generated config uses the legacy DNS server format and `wireguard` outbound, which newer sing-box releases deprecate — pin to 1.11.x for now.
+## Build the Windows .exe / installers
+
+```bash
+npm run build:app
+```
+
+Outputs: `src-tauri/target/release/vanish.exe` (portable; needs sing-box in `%APPDATA%pp.vanish.clientin\` or next to it), plus NSIS and MSI installers in `src-tauri/target/release/bundle/` which ship sing-box inside.
+
+Core lookup order: `core_path` setting, app-data `bin/`, bundled resources, next to the exe, `PATH`. If the configured ports are taken (e.g. by Nekoray) Vanish picks free ones automatically. TUN mode needs administrator/root privileges. Data lives in `%APPDATA%pp.vanish.client` (`nodes.json`, `settings.json`); only one instance can run.
