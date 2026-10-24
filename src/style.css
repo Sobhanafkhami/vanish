@@ -71,3 +71,24 @@ textarea {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Persian: Vazirmatn, no letter-spacing / uppercase (they break Arabic-script joining), mirrored chevrons. */
+html[lang="fa"] body,
+html[lang="fa"] button,
+html[lang="fa"] input,
+html[lang="fa"] textarea,
+html[lang="fa"] select {
+  font-family: Vazirmatn, "Segoe UI", Tahoma, system-ui, sans-serif;
+}
+html[lang="fa"] .font-mono {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, Vazirmatn, monospace;
+  /* numbers + units ("340 ms", "2.79 GB") must keep their order inside right-to-left text */
+}
+html[lang="fa"] .font-mono,
+html[lang="fa"] .font-mono * {
+  unicode-bidi: plaintext;
+}
+html[lang="fa"] * {
+  letter-spacing: normal !important;
+  text-transform: none !important;
+}

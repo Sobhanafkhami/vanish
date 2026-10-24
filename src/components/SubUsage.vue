@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { t } from "../lib/i18n";
 import { computed } from "vue";
 import { ArrowDown, ArrowUp, CalendarClock } from "lucide-vue-next";
 import type { Subscription } from "../lib/api";
@@ -16,14 +17,14 @@ const local = computed(() => {
 });
 
 const expiryText = computed(() => {
-  if (u.value.expired) return "Expired";
+  if (u.value.expired) return t("Expired");
   if (u.value.daysLeft === null) return null;
-  return u.value.daysLeft === 0 ? "Expires today" : `${u.value.daysLeft} day${u.value.daysLeft === 1 ? "" : "s"} left`;
+  return u.value.daysLeft === 0 ? t("Expires today") : t("{n} days left", { n: u.value.daysLeft });
 });
 const expiryTone = computed(() =>
   u.value.expired || (u.value.daysLeft ?? 99) <= 3 ? "text-red-400" : (u.value.daysLeft ?? 99) <= 7 ? "text-yellow-300" : "text-white/60",
 );
-const label = computed(() => `Remaining ${u.value.remainingPct === null ? "" : Math.round(u.value.remainingPct) + " percent"}`);
+const label = computed(() => `${t("Remaining")} ${u.value.remainingPct === null ? "" : Math.round(u.value.remainingPct) + "%"}`);
 </script>
 
 <template>
@@ -43,25 +44,25 @@ const label = computed(() => `Remaining ${u.value.remainingPct === null ? "" : M
 
       <div class="mt-1.5 flex items-start justify-between gap-3 font-mono text-[11px]">
         <div class="text-white/60">
-          <template v-if="u.used !== null">Used <span class="text-white/90">{{ u.kind === "remaining" ? "≈ " : "" }}{{ fmtBytes(u.used) }}</span></template>
-          <template v-else-if="u.kind === 'remaining'">Used <span class="text-white/45">not reported</span></template>
+          <template v-if="u.used !== null">{{ t("Used") }} <span class="text-white/90">{{ u.kind === "remaining" ? "≈ " : "" }}{{ fmtBytes(u.used) }}</span></template>
+          <template v-else-if="u.kind === 'remaining'">{{ t("Used") }} <span class="text-white/45">{{ t("not reported") }}</span></template>
         </div>
-        <div class="text-right text-white/60">
-          <template v-if="u.kind === 'unlimited'"><span class="text-accent-soft">Unlimited</span></template>
-          <template v-else-if="u.remaining !== null">Remaining <span class="text-accent-soft">{{ fmtBytes(u.remaining) }}</span></template>
+        <div class="text-end text-white/60">
+          <template v-if="u.kind === 'unlimited'"><span class="text-accent-soft">{{ t("Unlimited") }}</span></template>
+          <template v-else-if="u.remaining !== null">{{ t("Remaining") }} <span class="text-accent-soft">{{ fmtBytes(u.remaining) }}</span></template>
         </div>
       </div>
 
       <div class="mt-1 flex flex-wrap items-center justify-between gap-x-3 text-[10px] text-white/45">
-        <span v-if="u.total">Total {{ fmtBytes(u.total) }}<template v-if="u.remainingPct !== null"> · {{ Math.round(100 - u.remainingPct) }}% used</template></span>
-        <span v-else-if="u.kind === 'remaining'">Total not reported by this panel</span>
+        <span v-if="u.total">{{ t("Total") }} {{ fmtBytes(u.total) }}<template v-if="u.remainingPct !== null"> · {{ Math.round(100 - u.remainingPct) }}{{ t("% used") }}</template></span>
+        <span v-else-if="u.kind === 'remaining'">{{ t("Total not reported by this panel") }}</span>
         <span v-if="expiryText" class="flex items-center gap-1" :class="expiryTone"><CalendarClock :size="11" /> {{ expiryText }}</span>
       </div>
     </template>
-    <p v-else class="text-[11px] text-white/45">This subscription does not report traffic or expiry. Refresh it to check again.</p>
+    <p v-else class="text-[11px] text-white/45">{{ t("This subscription does not report traffic or expiry. Refresh it to check again.") }}</p>
 
-    <div v-if="local.down || local.up" class="mt-1.5 flex items-center gap-3 font-mono text-[10px] text-white/45" title="Traffic sent through this subscription's nodes in Vanish">
-      <span>Via Vanish</span>
+    <div v-if="local.down || local.up" class="mt-1.5 flex items-center gap-3 font-mono text-[10px] text-white/45" :title="t('Traffic sent through this subscription\'s nodes in Vanish')">
+      <span>{{ t("Via Vanish") }}</span>
       <span class="flex items-center"><ArrowDown :size="9" />{{ fmtBytes(local.down) }}</span>
       <span class="flex items-center"><ArrowUp :size="9" />{{ fmtBytes(local.up) }}</span>
     </div>

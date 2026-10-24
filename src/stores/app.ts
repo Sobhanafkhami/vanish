@@ -1,5 +1,6 @@
 import { computed, reactive } from "vue";
 import { listen } from "@tauri-apps/api/event";
+import { t } from "../lib/i18n";
 import {
   api,
   type CoreStatus,
@@ -137,7 +138,7 @@ export async function init() {
     store.settings = await api.getSettings();
   });
   await listen<string>("fallback", async (e) => {
-    notify(`Node unreachable — switched to ${e.payload}`);
+    notify(t("Node unreachable — switched to {name}", { name: e.payload }));
     store.settings = await api.getSettings();
     store.status = await api.coreStatus();
     setTimeout(measureLatency, 600);
@@ -202,9 +203,9 @@ export async function connectFastest() {
     const id = await api.pickFastest();
     await refreshNodes();
     store.settings = await api.getSettings();
-    if (!id) throw "no node answered the TCP ping";
+    if (!id) throw t("no node answered the TCP ping");
     const name = store.nodes.find((n) => n.id === id)?.name ?? "";
-    notify(`Fastest: ${name}`);
+    notify(t("Fastest: {name}", { name }));
     await reconnectIfRunning();
   });
 }
@@ -216,7 +217,7 @@ export async function importLinks(text: string): Promise<string> {
   store.settings = await api.getSettings(); // import may have auto-selected a node
   if (!res) return store.error;
   store.activeTab = "manual";
-  return `Imported ${res.added} node(s)` + (res.errors.length ? `, ${res.errors.length} skipped` : "");
+  return t("Imported {n} node(s)", { n: res.added }) + (res.errors.length ? t(", {n} skipped", { n: res.errors.length }) : "");
 }
 
 export async function addSubscription(name: string, url: string): Promise<string> {
@@ -226,13 +227,13 @@ export async function addSubscription(name: string, url: string): Promise<string
   if (!res) return store.error;
   const sub = store.subs.find((s) => s.url === url.trim());
   if (sub) store.activeTab = sub.id;
-  return `Imported ${res.added} node(s)` + (res.errors.length ? `, ${res.errors.length} skipped` : "");
+  return t("Imported {n} node(s)", { n: res.added }) + (res.errors.length ? t(", {n} skipped", { n: res.errors.length }) : "");
 }
 
 export async function refreshSubscription(id: string) {
   const res = await guarded(() => api.refreshSubscription(id));
   await refreshNodes();
-  if (res) notify(`Updated: ${res.added} node(s)`);
+  if (res) notify(t("Updated: {n} node(s)", { n: res.added }));
 }
 
 export async function renameSubscription(id: string, name: string) {
@@ -342,7 +343,7 @@ export async function resetSettings() {
   try {
     store.settings = await api.resetSettings();
     await reconnectIfRunning();
-    notify("Settings restored to defaults");
+    notify(t("Settings restored to defaults"));
   } catch (e) {
     store.error = String(e);
   }
@@ -352,9 +353,9 @@ export async function resetSettings() {
 export async function checkForUpdate(): Promise<string> {
   try {
     store.update = await api.checkUpdate();
-    return store.update ? `Version ${store.update.version} is available` : "You are on the latest version";
+    return store.update ? t("Version {v} is available", { v: store.update.version }) : t("You are on the latest version");
   } catch (e) {
-    return `Could not check for updates: ${e}`;
+    return t("Could not check for updates: {e}", { e: String(e) });
   }
 }
 

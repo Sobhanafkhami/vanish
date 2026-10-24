@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { t } from "../lib/i18n";
 import { computed } from "vue";
 import { ArrowDown, ArrowUp } from "lucide-vue-next";
 import { store } from "../stores/app";
@@ -28,8 +29,8 @@ const upPath = computed(() => path(store.upHistory));
 <template>
   <div class="panel shrink-0 p-4">
     <div class="mb-3 flex items-center justify-between">
-      <span class="hud-label">Live traffic</span>
-      <span class="hud-label">peak {{ fmt(scale) }}</span>
+      <span class="hud-label">{{ t("Live traffic") }}</span>
+      <span class="hud-label">{{ t("peak") }} {{ fmt(scale) }}</span>
     </div>
     <svg :viewBox="`0 0 ${W} ${H}`" class="h-16 w-full" preserveAspectRatio="none">
       <path :d="`${downPath} L${W},${H} L0,${H} Z`" fill="rgba(34,197,94,.12)" />
@@ -38,12 +39,12 @@ const upPath = computed(() => path(store.upHistory));
     </svg>
     <div class="mt-3 grid grid-cols-2 gap-3 font-mono">
       <div>
-        <div class="flex items-center gap-1 text-[10px] text-accent-soft"><ArrowDown :size="12" /> DOWN</div>
+        <div class="flex items-center gap-1 text-[10px] text-accent-soft"><ArrowDown :size="12" /> {{ t("DOWN") }}</div>
         <div class="text-lg text-white">{{ fmt(store.down) }}</div>
         <div class="text-[10px] text-white/50">Σ {{ fmt(store.downTotal, "") }}</div>
       </div>
       <div>
-        <div class="flex items-center gap-1 text-[10px] text-white/60"><ArrowUp :size="12" /> UP</div>
+        <div class="flex items-center gap-1 text-[10px] text-white/60"><ArrowUp :size="12" /> {{ t("UP") }}</div>
         <div class="text-lg text-white">{{ fmt(store.up) }}</div>
         <div class="text-[10px] text-white/50">Σ {{ fmt(store.upTotal, "") }}</div>
       </div>

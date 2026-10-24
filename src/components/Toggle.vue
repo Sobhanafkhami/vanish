@@ -6,6 +6,7 @@ defineEmits<{ "update:modelValue": [value: boolean] }>();
 <template>
   <button
     type="button"
+    dir="ltr"
     role="switch"
     :aria-checked="modelValue"
     :aria-label="label"

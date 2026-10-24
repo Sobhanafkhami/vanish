@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { t } from "../lib/i18n";
 import { computed, nextTick, ref, watch } from "vue";
 import Modal from "./Modal.vue";
 import { store } from "../stores/app";
@@ -30,7 +31,7 @@ watch(
 </script>
 
 <template>
-  <Modal title="Core log" wide @close="store.ui.logs = false">
+  <Modal :title="t('Core log')" wide @close="store.ui.logs = false">
     <div class="mb-3 flex items-center justify-between">
       <div class="flex gap-1 rounded-lg border border-ink-line bg-black/40 p-1">
         <button
@@ -40,13 +41,13 @@ watch(
           :class="level === l ? 'bg-accent/15 text-accent-soft' : 'text-white/50 hover:text-white/80'"
           @click="level = l"
         >
-          {{ l }}
+          {{ t(l) }}
         </button>
       </div>
-      <button class="btn" @click="store.logs.length = 0">Clear</button>
+      <button class="btn" @click="store.logs.length = 0">{{ t("Clear") }}</button>
     </div>
     <div ref="box" class="h-72 overflow-y-auto rounded-lg border border-ink-line bg-black/50 p-2 font-mono text-[11px] leading-5" style="user-select: text">
-      <div v-if="!lines.length" class="text-white/40">No log lines yet.</div>
+      <div v-if="!lines.length" class="text-white/40">{{ t("No log lines yet.") }}</div>
       <div v-for="(l, i) in lines" :key="i" class="whitespace-pre-wrap break-all" :class="cls(l)">{{ l }}</div>
     </div>
   </Modal>

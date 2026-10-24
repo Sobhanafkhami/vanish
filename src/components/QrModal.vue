@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { t } from "../lib/i18n";
 import { onMounted, ref } from "vue";
 import QRCode from "qrcode";
 import Modal from "./Modal.vue";
@@ -31,10 +32,10 @@ async function copy() {
 <template>
   <Modal :title="store.ui.qr!.title" @close="store.ui.qr = null">
     <div class="flex flex-col items-center gap-3">
-      <img v-if="img" :src="img" alt="QR code" class="h-60 w-60 rounded-lg" />
-      <p v-else-if="failed" class="text-xs text-white/60">Too long to fit in a QR code. Copy it instead.</p>
+      <img v-if="img" :src="img" :alt="t('QR code')" class="h-60 w-60 rounded-lg" />
+      <p v-else-if="failed" class="text-xs text-white/60">{{ t("Too long to fit in a QR code. Copy it instead.") }}</p>
       <p class="max-h-16 w-full overflow-hidden break-all font-mono text-[10px] text-white/45">{{ store.ui.qr!.text }}</p>
-      <button class="btn" @click="copy">{{ copied ? "Copied" : "Copy" }}</button>
+      <button class="btn" @click="copy">{{ copied ? t("Copied") : t("Copy") }}</button>
     </div>
   </Modal>
 </template>

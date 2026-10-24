@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { lang, setLang, t } from "../lib/i18n";
 import { onBeforeUnmount, ref } from "vue";
 import { AppWindow, Plus, RotateCcw, X } from "lucide-vue-next";
 import Modal from "./Modal.vue";
@@ -70,33 +71,48 @@ async function onCheck() {
 </script>
 
 <template>
-  <Modal v-if="store.settings" title="Settings" wide @close="store.ui.settings = false">
+  <Modal v-if="store.settings" :title="t('Settings')" wide @close="store.ui.settings = false">
     <section class="mb-5 space-y-3">
-      <h3 class="hud-label">General</h3>
-      <div v-for="t in toggles" :key="t.key" class="flex items-start justify-between gap-4">
+      <h3 class="hud-label">{{ t("General") }}</h3>
+      <div class="flex items-center justify-between gap-4">
+        <span class="text-sm text-white/90">{{ t("Language") }}</span>
+        <div class="flex gap-1 rounded-lg border border-ink-line bg-black/40 p-1">
+          <button
+            v-for="l in [{ id: 'en', label: 'English' }, { id: 'fa', label: 'فارسی' }] as const"
+            :key="l.id"
+            :aria-pressed="lang === l.id"
+            class="rounded-md px-3 py-1 text-xs transition"
+            :class="lang === l.id ? 'bg-accent/15 text-accent-soft' : 'text-white/50 hover:text-white/80'"
+            @click="setLang(l.id)"
+          >
+            {{ l.label }}
+          </button>
+        </div>
+      </div>
+      <div v-for="tg in toggles" :key="tg.key" class="flex items-start justify-between gap-4">
         <span>
-          <span class="block text-sm text-white/90">{{ t.label }}</span>
-          <span class="block text-xs text-white/50">{{ t.hint }}</span>
+          <span class="block text-sm text-white/90">{{ t(tg.label) }}</span>
+          <span class="block text-xs text-white/50">{{ t(tg.hint) }}</span>
         </span>
-        <Toggle class="mt-0.5" :label="t.label" :model-value="store.settings[t.key]" @update:model-value="updateSettings({ [t.key]: $event })" />
+        <Toggle class="mt-0.5" :label="t(tg.label)" :model-value="store.settings[tg.key]" @update:model-value="updateSettings({ [tg.key]: $event })" />
       </div>
       <label class="flex items-center justify-between gap-4">
         <span>
-          <span class="block text-sm text-white/90">Refresh subscriptions</span>
-          <span class="block text-xs text-white/50">How often saved subscriptions update in the background.</span>
+          <span class="block text-sm text-white/90">{{ t("Refresh subscriptions") }}</span>
+          <span class="block text-xs text-white/50">{{ t("How often saved subscriptions update in the background.") }}</span>
         </span>
         <select
           class="cursor-pointer rounded-lg border border-ink-line bg-ink-raised px-2 py-1 text-xs text-white outline-none focus:border-accent/60"
           :value="store.settings.sub_refresh_hours"
           @change="updateSettings({ sub_refresh_hours: Number(($event.target as HTMLSelectElement).value) })"
         >
-          <option v-for="c in refreshChoices" :key="c.v" :value="c.v">{{ c.label }}</option>
+          <option v-for="c in refreshChoices" :key="c.v" :value="c.v">{{ t(c.label) }}</option>
         </select>
       </label>
     </section>
 
     <section class="mb-5 space-y-3">
-      <h3 class="hud-label">Routing</h3>
+      <h3 class="hud-label">{{ t("Routing") }}</h3>
       <div class="flex gap-1 rounded-lg border border-ink-line bg-black/40 p-1">
         <button
           v-for="r in routes"
@@ -106,15 +122,15 @@ async function onCheck() {
           :class="store.settings.route_mode === r.id ? 'bg-accent/15 text-accent-soft' : 'text-white/50 hover:text-white/80'"
           @click="updateSettings({ route_mode: r.id })"
         >
-          {{ r.label }}
+          {{ t(r.label) }}
         </button>
       </div>
-      <p class="text-xs text-white/50">{{ routes.find((r) => r.id === store.settings!.route_mode)?.hint }} Changes apply immediately, reconnecting if needed.</p>
+      <p class="text-xs text-white/50">{{ t(routes.find((r) => r.id === store.settings!.route_mode)?.hint ?? '') }} {{ t("Changes apply immediately, reconnecting if needed.") }}</p>
 
       <label class="block">
-        <span class="text-sm text-white/90">Direct domains</span>
-        <span class="block text-xs text-white/50">One per line. Matches the domain and its subdomains (e.g. example.com).</span>
-        <textarea
+        <span class="text-sm text-white/90">{{ t("Direct domains") }}</span>
+        <span class="block text-xs text-white/50">{{ t("One per line. Matches the domain and its subdomains (e.g. example.com).") }}</span>
+        <textarea dir="ltr"
           rows="3"
           class="mt-1 w-full resize-none rounded-lg border border-ink-line bg-black/40 p-2 font-mono text-xs text-white outline-none focus:border-accent/60"
           :value="store.settings.direct_domains.join('\n')"
@@ -123,37 +139,37 @@ async function onCheck() {
       </label>
 
       <div>
-        <span class="text-sm text-white/90">Direct apps</span>
-        <span class="block text-xs text-white/50">These programs bypass the proxy.</span>
+        <span class="text-sm text-white/90">{{ t("Direct apps") }}</span>
+        <span class="block text-xs text-white/50">{{ t("These programs bypass the proxy.") }}</span>
         <div class="mt-2 flex flex-wrap gap-2">
           <span
             v-for="a in store.settings.direct_apps"
             :key="a"
-            class="inline-flex items-center gap-1.5 rounded-lg border border-ink-line bg-black/40 py-1 pl-2.5 pr-1.5 font-mono text-xs text-white/85"
+            class="inline-flex items-center gap-1.5 rounded-lg border border-ink-line bg-black/40 py-1 ps-2.5 pe-1.5 font-mono text-xs text-white/85"
           >
             <AppWindow :size="12" class="text-accent-soft" /> {{ a }}
             <button class="rounded p-0.5 text-white/40 transition hover:text-red-400" :aria-label="`Remove ${a}`" @click="removeApp(a)"><X :size="12" /></button>
           </span>
-          <span v-if="!store.settings.direct_apps.length" class="text-xs text-white/40">No apps added.</span>
+          <span v-if="!store.settings.direct_apps.length" class="text-xs text-white/40">{{ t("No apps added.") }}</span>
         </div>
         <div class="mt-2 flex gap-2">
-          <input
+          <input dir="ltr"
             v-model="appName"
-            placeholder="steam.exe"
+            :placeholder="t('steam.exe')"
             class="min-w-0 flex-1 rounded-lg border border-ink-line bg-black/40 px-2 py-1.5 font-mono text-xs text-white outline-none placeholder:text-white/30 focus:border-accent/60"
             @keydown.enter="addTyped"
           />
-          <button class="btn" :disabled="!appName.trim()" @click="addTyped"><Plus :size="13" /> Add</button>
-          <button class="btn" @click="store.ui.appPicker = true"><AppWindow :size="13" /> Choose app…</button>
+          <button class="btn" :disabled="!appName.trim()" @click="addTyped"><Plus :size="13" /> {{ t("Add") }}</button>
+          <button class="btn" @click="store.ui.appPicker = true"><AppWindow :size="13" /> {{ t("Choose app…") }}</button>
         </div>
       </div>
     </section>
 
     <section class="mb-5 space-y-3">
-      <h3 class="hud-label">Network</h3>
+      <h3 class="hud-label">{{ t("Network") }}</h3>
       <label class="flex items-center justify-between gap-4">
-        <span class="text-sm text-white/90">DNS over HTTPS server</span>
-        <input
+        <span class="text-sm text-white/90">{{ t("DNS over HTTPS server") }}</span>
+        <input dir="ltr"
           class="w-44 rounded-lg border border-ink-line bg-black/40 px-2 py-1 font-mono text-xs text-white outline-none focus:border-accent/60"
           :value="store.settings.dns_server"
           placeholder="1.1.1.1"
@@ -162,34 +178,34 @@ async function onCheck() {
       </label>
       <label class="block">
         <span class="flex items-center justify-between gap-4">
-          <span class="text-sm text-white/90">Test URL</span>
-          <input
+          <span class="text-sm text-white/90">{{ t("Test URL") }}</span>
+          <input dir="ltr"
             class="w-72 rounded-lg border border-ink-line bg-black/40 px-2 py-1 font-mono text-xs text-white outline-none focus:border-accent/60"
             :value="store.settings.ping_url"
             @change="updateSettings({ ping_url: ($event.target as HTMLInputElement).value.trim() })"
           />
         </span>
-        <span class="mt-1 block text-xs text-white/50">Used by Real delay and the latency check. Any HTTP(S) URL that returns quickly.</span>
+        <span class="mt-1 block text-xs text-white/50">{{ t("Used by Real delay and the latency check. Any HTTP(S) URL that returns quickly.") }}</span>
       </label>
       <div class="grid grid-cols-2 gap-4">
         <label class="flex items-center justify-between gap-2">
-          <span class="text-sm text-white/90">Local port</span>
-          <input type="number" min="1024" max="65535" class="w-24 rounded-lg border border-ink-line bg-black/40 px-2 py-1 font-mono text-xs text-white outline-none focus:border-accent/60" :value="store.settings.mixed_port" @change="onPort('mixed_port', $event)" />
+          <span class="text-sm text-white/90">{{ t("Local port") }}</span>
+          <input dir="ltr" type="number" min="1024" max="65535" class="w-24 rounded-lg border border-ink-line bg-black/40 px-2 py-1 font-mono text-xs text-white outline-none focus:border-accent/60" :value="store.settings.mixed_port" @change="onPort('mixed_port', $event)" />
         </label>
         <label class="flex items-center justify-between gap-2">
-          <span class="text-sm text-white/90">API port</span>
-          <input type="number" min="1024" max="65535" class="w-24 rounded-lg border border-ink-line bg-black/40 px-2 py-1 font-mono text-xs text-white outline-none focus:border-accent/60" :value="store.settings.api_port" @change="onPort('api_port', $event)" />
+          <span class="text-sm text-white/90">{{ t("API port") }}</span>
+          <input dir="ltr" type="number" min="1024" max="65535" class="w-24 rounded-lg border border-ink-line bg-black/40 px-2 py-1 font-mono text-xs text-white outline-none focus:border-accent/60" :value="store.settings.api_port" @change="onPort('api_port', $event)" />
         </label>
       </div>
     </section>
 
     <section class="mb-5 space-y-3">
-      <h3 class="hud-label">About</h3>
+      <h3 class="hud-label">{{ t("About") }}</h3>
       <div class="flex items-center justify-between gap-4">
-        <span class="text-sm text-white/90">Vanish <span class="font-mono text-xs text-white/50">{{ store.version ? "v" + store.version : "" }}</span></span>
+        <span class="text-sm text-white/90">{{ t("Vanish") }} <span class="font-mono text-xs text-white/50">{{ store.version ? "v" + store.version : "" }}</span></span>
         <div class="flex items-center gap-2">
           <button v-if="store.update" class="btn !border-accent/50 !text-accent-soft" :disabled="store.updating" @click="installUpdate">
-            {{ store.updating ? "Updating…" : `Install ${store.update.version}` }}
+            {{ store.updating ? t("Updating…") : t("Install {v}", { v: store.update.version }) }}
           </button>
           <button class="btn" :disabled="checking" @click="onCheck">{{ checking ? "Checking…" : "Check for updates" }}</button>
         </div>
@@ -200,11 +216,11 @@ async function onCheck() {
     <section class="border-t border-ink-line pt-4">
       <div class="flex items-center justify-between gap-4">
         <span>
-          <span class="block text-sm text-white/90">Reset to default</span>
-          <span class="block text-xs text-white/50">Restores every setting above. Your nodes and subscriptions are kept.</span>
+          <span class="block text-sm text-white/90">{{ t("Reset to default") }}</span>
+          <span class="block text-xs text-white/50">{{ t("Restores every setting above. Your nodes and subscriptions are kept.") }}</span>
         </span>
         <button class="btn shrink-0" :class="confirmReset ? '!border-red-500/60 !text-red-300' : ''" @click="onReset">
-          <RotateCcw :size="13" /> {{ confirmReset ? "Click again to confirm" : "Reset" }}
+          <RotateCcw :size="13" /> {{ confirmReset ? t("Click again to confirm") : t("Reset") }}
         </button>
       </div>
     </section>

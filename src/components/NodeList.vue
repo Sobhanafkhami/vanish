@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { t } from "../lib/i18n";
 import { computed, nextTick, ref } from "vue";
 import { Activity, ArrowDown, ArrowDownUp, ArrowUp, Check, ClipboardPaste, Pencil, QrCode, RefreshCw, Search, Timer, Trash2, X, Zap } from "lucide-vue-next";
 import SubUsage from "./SubUsage.vue";
@@ -63,7 +64,7 @@ async function paste() {
       input.value = text;
     }
   } catch {
-    flash("Clipboard access was denied");
+    flash(t("Clipboard access was denied"));
   }
 }
 
@@ -94,12 +95,12 @@ function latencyClass(ms: number | null, good = 150, ok = 400) {
 
 function delayText(d: number | null) {
   if (d === null) return store.delayTesting ? "…" : "—";
-  return d < 0 ? "timeout" : `${d} ms`;
+  return d < 0 ? t("timeout") : `${d} ms`;
 }
 
 const updatedText = computed(() => {
-  const t = activeSub.value?.updated_at;
-  return t ? new Date(t * 1000).toLocaleString() : "never";
+  const at = activeSub.value?.updated_at;
+  return at ? new Date(at * 1000).toLocaleString() : t("never");
 });
 
 async function startRename() {
@@ -115,28 +116,28 @@ async function commitRename() {
 }
 async function deleteSub() {
   if (!activeSub.value) return;
-  if (confirm(`Remove "${activeSub.value.name}" and its ${countFor(activeSub.value.id)} node(s)?`)) await removeSubscription(activeSub.value.id);
+  if (confirm(t('Remove "{name}" and its {n} node(s)?', { name: activeSub.value.name, n: countFor(activeSub.value.id) }))) await removeSubscription(activeSub.value.id);
 }
 </script>
 
 <template>
   <div class="panel flex min-h-0 flex-1 flex-col p-4">
     <div class="mb-3 flex items-center justify-between">
-      <span class="hud-label">Nodes · {{ visible.length }}</span>
+      <span class="hud-label">{{ t("Nodes ·") }} {{ visible.length }}</span>
       <div class="flex gap-2">
-        <button class="btn" :disabled="store.busy || !store.nodes.length" title="Ping all, then select the quickest" @click="connectFastest">
-          <Zap :size="13" /> Fastest
+        <button class="btn" :disabled="store.busy || !store.nodes.length" :title="t('Ping all, then select the quickest')" @click="connectFastest">
+          <Zap :size="13" /> {{ t("Fastest") }}
         </button>
-        <button class="btn" :disabled="store.busy || !store.nodes.length" title="TCP connect time to each server" @click="pingAll"><Activity :size="13" /> TCP ping</button>
+        <button class="btn" :disabled="store.busy || !store.nodes.length" :title="t('TCP connect time to each server')" @click="pingAll"><Activity :size="13" /> {{ t("TCP ping") }}</button>
         <button
           class="btn"
           :disabled="store.delayTesting || !visible.length"
-          title="Real HTTP request through each node, like URL test"
+          :title="t('Real HTTP request through each node, like URL test')"
           @click="realDelay(visible.map((n) => n.id))"
         >
-          <Timer :size="13" /> {{ store.delayTesting ? "Testing…" : "Real delay" }}
+          <Timer :size="13" /> {{ store.delayTesting ? t("Testing…") : t("Real delay") }}
         </button>
-        <button class="btn" @click="showImport = !showImport"><ClipboardPaste :size="13" /> Import</button>
+        <button class="btn" @click="showImport = !showImport"><ClipboardPaste :size="13" /> {{ t("Import") }}</button>
       </div>
     </div>
 
@@ -151,34 +152,34 @@ async function deleteSub() {
               :class="importKind === k.id ? 'bg-accent/15 text-accent-soft' : 'text-white/50 hover:text-white/80'"
               @click="importKind = k.id"
             >
-              {{ k.label }}
+              {{ t(k.label) }}
             </button>
           </div>
-          <button class="btn" @click="paste"><ClipboardPaste :size="13" /> Paste</button>
+          <button class="btn" @click="paste"><ClipboardPaste :size="13" /> {{ t("Paste") }}</button>
         </div>
 
         <div v-if="importKind === 'sub'" class="space-y-2">
           <input
             v-model="subName"
             maxlength="40"
-            placeholder="Name (e.g. Work, Home)"
+            :placeholder="t('Name (e.g. Work, Home)')"
             class="w-full rounded-lg border border-ink-line bg-black/40 p-2 text-xs text-white outline-none placeholder:text-white/30 focus:border-accent/60"
           />
-          <input
+          <input dir="ltr"
             v-model="subUrl"
-            placeholder="https://example.com/sub/..."
+            :placeholder="t('https://example.com/sub/...')"
             class="w-full rounded-lg border border-ink-line bg-black/40 p-2 font-mono text-xs text-white outline-none placeholder:text-white/30 focus:border-accent/60"
             @keydown.enter="doImport"
           />
         </div>
-        <textarea
+        <textarea dir="ltr"
           v-else
           v-model="input"
           rows="3"
-          placeholder="vless:// vmess:// trojan:// ss:// wireguard:// links, or sing-box outbound JSON"
+          :placeholder="t('vless:// vmess:// trojan:// ss:// wireguard:// links, or sing-box outbound JSON')"
           class="w-full resize-none rounded-lg border border-ink-line bg-black/40 p-2 font-mono text-xs text-white outline-none placeholder:text-white/30 focus:border-accent/60"
         />
-        <button class="btn mt-2" :disabled="store.busy" @click="doImport">{{ importKind === "sub" ? "Add subscription" : "Add" }}</button>
+        <button class="btn mt-2" :disabled="store.busy" @click="doImport">{{ importKind === "sub" ? t("Add subscription") : t("Add") }}</button>
       </div>
     </Transition>
     <div v-if="message" class="mb-2 font-mono text-xs text-accent-soft">{{ message }}</div>
@@ -192,7 +193,7 @@ async function deleteSub() {
         :class="store.activeTab === 'all' ? 'bg-accent/15 text-accent-soft' : 'text-white/50 hover:text-white/80'"
         @click="store.activeTab = 'all'"
       >
-        All <span class="ml-1 font-mono text-[10px] opacity-70">{{ store.nodes.length }}</span>
+        {{ t("All") }} <span class="ms-1 font-mono text-[10px] opacity-70">{{ store.nodes.length }}</span>
       </button>
       <button
         v-if="manualCount"
@@ -202,7 +203,7 @@ async function deleteSub() {
         :class="store.activeTab === 'manual' ? 'bg-accent/15 text-accent-soft' : 'text-white/50 hover:text-white/80'"
         @click="store.activeTab = 'manual'"
       >
-        Manual <span class="ml-1 font-mono text-[10px] opacity-70">{{ manualCount }}</span>
+        {{ t("Manual") }} <span class="ms-1 font-mono text-[10px] opacity-70">{{ manualCount }}</span>
       </button>
       <button
         v-for="s in store.subs"
@@ -213,7 +214,7 @@ async function deleteSub() {
         :class="store.activeTab === s.id ? 'bg-accent/15 text-accent-soft' : 'text-white/50 hover:text-white/80'"
         @click="store.activeTab = s.id"
       >
-        {{ s.name }} <span class="ml-1 font-mono text-[10px] opacity-70">{{ countFor(s.id) }}</span>
+        {{ s.name }} <span class="ms-1 font-mono text-[10px] opacity-70">{{ countFor(s.id) }}</span>
         <!-- remaining share at a glance -->
         <span v-if="subUsage(s).remainingPct !== null" class="mt-1 block h-0.5 overflow-hidden rounded-full bg-white/10" aria-hidden="true">
           <span class="block h-full rounded-full" :class="usageTone(subUsage(s).remainingPct)" :style="{ width: subUsage(s).remainingPct + '%' }"></span>
@@ -236,41 +237,41 @@ async function deleteSub() {
         />
         <div class="flex shrink-0 gap-1 text-white/50">
           <template v-if="renaming">
-            <button class="p-1 hover:text-accent-soft" aria-label="Save name" @click="commitRename"><Check :size="14" /></button>
-            <button class="p-1 hover:text-white" aria-label="Cancel" @click="renaming = false"><X :size="14" /></button>
+            <button class="p-1 hover:text-accent-soft" :aria-label="t('Save name')" @click="commitRename"><Check :size="14" /></button>
+            <button class="p-1 hover:text-white" :aria-label="t('Cancel')" @click="renaming = false"><X :size="14" /></button>
           </template>
           <template v-else>
-            <button class="p-1 hover:text-white" aria-label="Rename subscription" @click="startRename"><Pencil :size="14" /></button>
-            <button class="p-1 hover:text-white" aria-label="Show subscription QR" @click="store.ui.qr = { title: activeSub.name, text: activeSub.url }">
+            <button class="p-1 hover:text-white" :aria-label="t('Rename subscription')" @click="startRename"><Pencil :size="14" /></button>
+            <button class="p-1 hover:text-white" :aria-label="t('Show subscription QR')" @click="store.ui.qr = { title: activeSub.name, text: activeSub.url }">
               <QrCode :size="14" />
             </button>
-            <button class="p-1 hover:text-accent-soft disabled:opacity-40" :disabled="store.busy" aria-label="Refresh subscription" @click="refreshSubscription(activeSub.id)">
+            <button class="p-1 hover:text-accent-soft disabled:opacity-40" :disabled="store.busy" :aria-label="t('Refresh subscription')" @click="refreshSubscription(activeSub.id)">
               <RefreshCw :size="14" />
             </button>
-            <button class="p-1 hover:text-red-400" aria-label="Remove subscription" @click="deleteSub"><Trash2 :size="14" /></button>
+            <button class="p-1 hover:text-red-400" :aria-label="t('Remove subscription')" @click="deleteSub"><Trash2 :size="14" /></button>
           </template>
         </div>
       </div>
       <div class="mt-1 truncate font-mono text-[10px] text-white/45">{{ activeSub.url }}</div>
       <SubUsage :sub="activeSub" />
-      <div class="mt-2 font-mono text-[10px] text-white/45">Updated {{ updatedText }}</div>
+      <div class="mt-2 font-mono text-[10px] text-white/45">{{ t("Updated") }} {{ updatedText }}</div>
     </div>
 
     <div class="mb-3 flex gap-2">
       <label class="flex flex-1 items-center gap-2 rounded-lg border border-ink-line bg-black/30 px-2 text-white/50 focus-within:border-accent/60">
         <Search :size="13" />
-        <input v-model="query" placeholder="Search nodes" class="w-full bg-transparent py-1.5 text-xs text-white outline-none placeholder:text-white/30" />
+        <input v-model="query" :placeholder="t('Search nodes')" class="w-full bg-transparent py-1.5 text-xs text-white outline-none placeholder:text-white/30" />
       </label>
       <button class="btn" :class="{ '!border-accent/50 !text-accent-soft': sortByPing }" :aria-pressed="sortByPing" @click="sortByPing = !sortByPing">
-        <ArrowDownUp :size="13" /> Ping
+        <ArrowDownUp :size="13" /> {{ t("Ping") }}
       </button>
     </div>
 
-    <div class="-mr-2 flex-1 space-y-2 overflow-y-auto pr-2">
+    <div class="-me-2 flex-1 space-y-2 overflow-y-auto pe-2">
       <div v-if="!store.nodes.length" class="grid h-full place-items-center text-center text-xs text-white/40">
-        No nodes yet.<br />Import a subscription or paste a config link.
+        {{ t("No nodes yet.") }}<br />{{ t("Import a subscription or paste a config link.") }}
       </div>
-      <div v-else-if="!visible.length" class="grid h-full place-items-center text-center text-xs text-white/40">No nodes match.</div>
+      <div v-else-if="!visible.length" class="grid h-full place-items-center text-center text-xs text-white/40">{{ t("No nodes match.") }}</div>
       <div
         v-for="n in visible"
         :key="n.id"
@@ -283,25 +284,25 @@ async function deleteSub() {
           <div class="truncate text-sm text-white/90">{{ n.name }}</div>
           <div class="flex items-center gap-2 truncate font-mono text-[10px] text-white/45">
             <span class="truncate">{{ n.server }}:{{ n.port }}</span>
-            <span v-if="n.up_total || n.down_total" class="flex shrink-0 items-center gap-1.5" title="Total traffic through this node">
+            <span v-if="n.up_total || n.down_total" class="flex shrink-0 items-center gap-1.5" :title="t('Total traffic through this node')">
               <span class="flex items-center"><ArrowDown :size="9" />{{ fmtBytes(n.down_total) }}</span>
               <span class="flex items-center"><ArrowUp :size="9" />{{ fmtBytes(n.up_total) }}</span>
             </span>
           </div>
         </div>
-        <div class="w-16 shrink-0 text-right font-mono leading-tight">
-          <div class="text-xs" :class="latencyClass(n.delay !== null && n.delay < 0 ? 99999 : n.delay, 400, 800)" title="Real HTTP delay">{{ delayText(n.delay) }}</div>
-          <div class="text-[10px]" :class="latencyClass(n.latency)" title="TCP ping">tcp {{ n.latency === null ? "—" : n.latency }}</div>
+        <div class="w-16 shrink-0 text-end font-mono leading-tight">
+          <div class="text-xs" :class="latencyClass(n.delay !== null && n.delay < 0 ? 99999 : n.delay, 400, 800)" :title="t('Real HTTP delay')">{{ delayText(n.delay) }}</div>
+          <div class="text-[10px]" :class="latencyClass(n.latency)" :title="t('TCP ping')">{{ t("tcp") }} {{ n.latency === null ? "—" : n.latency }}</div>
         </div>
         <button
           v-if="n.link"
           class="text-white/30 opacity-0 transition hover:text-white focus-visible:opacity-100 group-hover:opacity-100"
-          aria-label="Show QR code"
+          :aria-label="t('Show QR code')"
           @click.stop="store.ui.qr = { title: n.name, text: n.link }"
         >
           <QrCode :size="14" />
         </button>
-        <button class="text-white/30 opacity-0 transition hover:text-red-400 focus-visible:opacity-100 group-hover:opacity-100" aria-label="Remove node" @click.stop="removeNode(n.id)">
+        <button class="text-white/30 opacity-0 transition hover:text-red-400 focus-visible:opacity-100 group-hover:opacity-100" :aria-label="t('Remove node')" @click.stop="removeNode(n.id)">
           <Trash2 :size="14" />
         </button>
       </div>

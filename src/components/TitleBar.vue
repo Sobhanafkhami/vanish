@@ -1,25 +1,36 @@
 <script setup lang="ts">
+import { lang, setLang, t } from "../lib/i18n";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Minus, ScrollText, Settings, Square, X } from "lucide-vue-next";
 import { store } from "../stores/app";
+import logo from "../assets/logo.png";
 
 const win = getCurrentWindow();
 </script>
 
 <template>
   <header
+    dir="ltr"
     data-tauri-drag-region
-    class="flex h-10 shrink-0 items-center justify-between border-b border-ink-line bg-black/40 pl-4"
+    class="flex h-10 shrink-0 items-center justify-between border-b border-ink-line bg-black/40 ps-4"
   >
     <div data-tauri-drag-region class="pointer-events-none flex items-center gap-2">
-      <span class="h-2 w-2 rounded-full bg-accent"></span>
-      <span class="font-mono text-xs font-semibold uppercase tracking-[0.3em] text-white/80">Vanish</span>
+      <img :src="logo" alt="" class="h-5 w-5 rounded" />
+      <span class="font-mono text-xs font-semibold uppercase tracking-[0.3em] text-white/80">{{ t("Vanish") }}</span>
     </div>
     <div class="flex h-full">
-      <button class="w-11 text-white/50 transition hover:bg-white/10 hover:text-white" aria-label="Core log" @click="store.ui.logs = true">
+      <button
+        class="w-11 font-mono text-[11px] text-white/50 transition hover:bg-white/10 hover:text-white"
+        :aria-label="t('Language')"
+        :title="t('Language')"
+        @click="setLang(lang === 'fa' ? 'en' : 'fa')"
+      >
+        {{ lang === "fa" ? "EN" : "فا" }}
+      </button>
+      <button class="w-11 text-white/50 transition hover:bg-white/10 hover:text-white" :aria-label="t('Core log')" @click="store.ui.logs = true">
         <ScrollText :size="14" class="mx-auto" />
       </button>
-      <button class="w-11 text-white/50 transition hover:bg-white/10 hover:text-white" aria-label="Settings" @click="store.ui.settings = true">
+      <button class="w-11 text-white/50 transition hover:bg-white/10 hover:text-white" :aria-label="t('Settings')" @click="store.ui.settings = true">
         <Settings :size="14" class="mx-auto" />
       </button>
       <button class="w-11 text-white/50 transition hover:bg-white/10 hover:text-white" @click="win.minimize()">

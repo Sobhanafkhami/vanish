@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { t, tDetail } from "../lib/i18n";
 import { computed, ref } from "vue";
 import { CircleCheck, CircleX, Info, Play, TriangleAlert } from "lucide-vue-next";
 import Modal from "./Modal.vue";
@@ -64,18 +65,18 @@ const word = { ok: "OK", warn: "Warning", fail: "Problem", info: "Info" } as con
 </script>
 
 <template>
-  <Modal title="Network tools" wide @close="store.ui.tools = false">
+  <Modal :title="t('Network tools')" wide @close="store.ui.tools = false">
     <div class="mb-4 flex gap-1 rounded-lg border border-ink-line bg-black/40 p-1" role="tablist">
       <button
-        v-for="t in tabs"
-        :key="t.id"
+        v-for="tb in tabs"
+        :key="tb.id"
         role="tab"
-        :aria-selected="tab === t.id"
+        :aria-selected="tab === tb.id"
         class="flex-1 rounded-md px-3 py-1.5 text-xs transition"
-        :class="tab === t.id ? 'bg-accent/15 text-accent-soft' : 'text-white/50 hover:text-white/80'"
-        @click="tab = t.id"
+        :class="tab === tb.id ? 'bg-accent/15 text-accent-soft' : 'text-white/50 hover:text-white/80'"
+        @click="tab = tb.id"
       >
-        {{ t.label }}
+        {{ t(tb.label) }}
       </button>
     </div>
 
@@ -83,7 +84,7 @@ const word = { ok: "OK", warn: "Warning", fail: "Problem", info: "Info" } as con
     <div v-if="tab === 'speed'">
       <div class="mb-2 flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-[11px] text-white/55">
         <span>{{ r?.server ?? "Cloudflare" }}</span>
-        <span>{{ (r ? r.via_tunnel : store.status.running) ? "via tunnel" : "direct connection" }}</span>
+        <span>{{ (r ? r.via_tunnel : store.status.running) ? t("via tunnel") : t("direct connection") }}</span>
         <template v-if="r">
           <span v-if="r.isp">{{ r.isp }}</span>
           <span v-if="r.location">{{ r.location }}</span>
@@ -95,15 +96,15 @@ const word = { ok: "OK", warn: "Warning", fail: "Problem", info: "Info" } as con
       <div v-if="idle" class="grid place-items-center py-6">
         <button
           class="grid h-40 w-40 place-items-center rounded-full border-2 border-accent/60 bg-accent/5 text-4xl font-semibold tracking-[0.25em] text-accent-soft shadow-[0_0_40px_rgba(34,197,94,.25)] transition hover:bg-accent/15 hover:shadow-[0_0_56px_rgba(34,197,94,.4)]"
-          aria-label="Start speed test"
+          :aria-label="t('Start speed test')"
           @click="runSpeedTest"
         >
-          GO
+          {{ t("GO") }}
         </button>
       </div>
 
       <template v-else>
-        <SpeedGauge :value="gaugeValue" :color="gaugeColor" :caption="caption" />
+        <SpeedGauge :value="gaugeValue" :color="gaugeColor" :caption="t(caption)" />
 
         <div class="mt-1 grid grid-cols-3 gap-3 text-center">
           <div
@@ -112,9 +113,9 @@ const word = { ok: "OK", warn: "Warning", fail: "Problem", info: "Info" } as con
             class="rounded-xl border bg-black/30 px-2 py-3 transition-colors"
             :class="c.active ? 'border-accent/60' : 'border-ink-line'"
           >
-            <div class="hud-label">{{ c.label }}</div>
+            <div class="hud-label">{{ t(c.label) }}</div>
             <div class="mt-1 font-mono text-xl text-white">{{ c.value }}</div>
-            <div class="text-[10px] text-white/45">{{ c.unit }}<template v-if="c.p === 'ping' && r"> · jitter {{ r.jitter_ms.toFixed(0) }} ms</template></div>
+            <div class="text-[10px] text-white/45">{{ c.unit }}<template v-if="c.p === 'ping' && r"> {{ t("· jitter") }} {{ r.jitter_ms.toFixed(0) }} {{ t("ms") }}</template></div>
           </div>
         </div>
 
@@ -126,34 +127,34 @@ const word = { ok: "OK", warn: "Warning", fail: "Problem", info: "Info" } as con
 
       <p v-if="sp.error" class="mt-3 rounded-lg border border-red-500/40 p-2 font-mono text-xs text-red-300" role="alert">{{ sp.error }}</p>
       <ul v-if="r?.notes.length" class="mt-3 space-y-1">
-        <li v-for="n in r.notes" :key="n" class="flex items-start gap-2 text-xs text-yellow-300" role="alert"><TriangleAlert :size="13" class="mt-0.5 shrink-0" /> {{ n }}</li>
+        <li v-for="n in r.notes" :key="n" class="flex items-start gap-2 text-xs text-yellow-300" role="alert"><TriangleAlert :size="13" class="mt-0.5 shrink-0" /> {{ tDetail(n) }}</li>
       </ul>
 
       <div class="mt-3 flex items-center justify-between gap-3">
-        <p class="text-xs text-white/50">{{ hint }}</p>
+        <p class="text-xs text-white/50">{{ t(hint) }}</p>
         <button v-if="!idle" class="btn shrink-0" :disabled="sp.running" @click="runSpeedTest">
-          <Play :size="13" /> {{ sp.running ? "Testing…" : "Run again" }}
+          <Play :size="13" /> {{ sp.running ? t("Testing…") : t("Run again") }}
         </button>
       </div>
     </div>
 
     <!-- leak test -->
     <div v-else>
-      <p class="mb-3 text-xs text-white/50">Compares your direct connection with the tunnel: exit IP, DNS resolver and IPv6.</p>
+      <p class="mb-3 text-xs text-white/50">{{ t("Compares your direct connection with the tunnel: exit IP, DNS resolver and IPv6.") }}</p>
       <ul v-if="store.diag.result" class="space-y-2">
         <li v-for="c in store.diag.result.checks" :key="c.label" class="flex items-start gap-3 rounded-xl border border-ink-line bg-black/30 px-3 py-2.5">
           <component :is="icons[c.status]" :size="16" class="mt-0.5 shrink-0" :class="tone[c.status]" />
           <div class="min-w-0">
             <div class="text-sm text-white/90">
-              {{ c.label }} <span class="ml-1 text-[10px] uppercase tracking-wider" :class="tone[c.status]">{{ word[c.status] }}</span>
+              {{ t(c.label) }} <span class="ms-1 text-[10px] uppercase tracking-wider" :class="tone[c.status]">{{ t(word[c.status]) }}</span>
             </div>
-            <div class="break-words text-xs text-white/55" style="user-select: text">{{ c.detail }}</div>
+            <div class="break-words text-xs text-white/55" style="user-select: text">{{ tDetail(c.detail) }}</div>
           </div>
         </li>
       </ul>
       <p v-if="store.diag.error" class="rounded-lg border border-red-500/40 p-2 font-mono text-xs text-red-300" role="alert">{{ store.diag.error }}</p>
       <button class="btn mt-3" :disabled="store.diag.running" @click="runDiagnostics">
-        <Play :size="13" /> {{ store.diag.running ? "Checking…" : store.diag.result ? "Run again" : "Run test" }}
+        <Play :size="13" /> {{ store.diag.running ? t("Checking…") : store.diag.result ? t("Run again") : t("Run test") }}
       </button>
     </div>
   </Modal>

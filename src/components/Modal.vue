@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { t } from "../lib/i18n";
 import { onMounted, ref } from "vue";
 import { X } from "lucide-vue-next";
 
@@ -14,7 +15,7 @@ onMounted(() => root.value?.focus()); // so Esc closes the dialog
     <div class="panel flex max-h-full w-full flex-col overflow-hidden" :class="wide ? 'max-w-2xl' : 'max-w-sm'">
       <div class="flex items-center justify-between border-b border-ink-line px-4 py-3">
         <span class="text-sm font-medium text-white">{{ title }}</span>
-        <button class="text-white/50 hover:text-white" aria-label="Close" @click="$emit('close')"><X :size="16" /></button>
+        <button class="text-white/50 hover:text-white" :aria-label="t('Close')" @click="$emit('close')"><X :size="16" /></button>
       </div>
       <div class="min-h-0 flex-1 overflow-y-auto p-4"><slot /></div>
     </div>
