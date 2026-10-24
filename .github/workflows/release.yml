@@ -1,14 +1,11 @@
 name: Release
 
-# Every push to main builds the Windows installers and publishes a GitHub release.
+# Every push to main (even an empty commit) builds the Windows installers and publishes a GitHub release.
 # Version = <major>.<minor> from package.json + the workflow run number as the patch,
 # so each release is newer than the last and the in-app updater always sees it.
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - "**/*.md"
-      - ".gitignore"
   workflow_dispatch:
 
 permissions:

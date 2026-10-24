@@ -39,7 +39,7 @@ Core lookup order: `core_path` setting, app-data `bin/`, bundled resources, next
 
 ## Releases (automatic)
 
-`.github/workflows/release.yml` runs on every push to `main` (docs-only pushes are skipped): it builds the signed NSIS and MSI installers on a Windows runner, stamps the version as `<major>.<minor>` from `package.json` plus the run number (e.g. `0.1.42`), and creates the GitHub release `v0.1.42` with the installers and `latest.json` for the in-app updater. Releases show up in the repository sidebar and on the Releases page.
+`.github/workflows/release.yml` runs on every push to `main`: it builds the signed NSIS and MSI installers on a Windows runner, stamps the version as `<major>.<minor>` from `package.json` plus the run number (e.g. `0.1.42`), and creates the GitHub release `v0.1.42` with the installers and `latest.json` for the in-app updater. Releases show up in the repository sidebar and on the Releases page.
 
 One-time setup: add the repository secret **`TAURI_SIGNING_PRIVATE_KEY`** (Settings > Secrets and variables > Actions) with the full contents of the updater private key file. If the key has a password, also add `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. To start a new minor line, bump `version` in `package.json` (e.g. `0.2.0`).
 
