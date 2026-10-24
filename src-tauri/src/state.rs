@@ -147,12 +147,27 @@ fn migrate_legacy_subs(nodes: &mut [Node], subs: &mut Vec<Subscription>) -> bool
     changed
 }
 
+/// Older builds could give several nodes of one subscription the same id (they matched on server:port only),
+/// which made them select together. Give every repeat a fresh id; the first keeps its own so a selection survives.
+fn dedupe_ids(nodes: &mut [Node]) -> bool {
+    let mut seen = std::collections::HashSet::new();
+    let mut changed = false;
+    for n in nodes.iter_mut() {
+        if !seen.insert(n.id.clone()) {
+            n.id = uuid::Uuid::new_v4().to_string();
+            seen.insert(n.id.clone());
+            changed = true;
+        }
+    }
+    changed
+}
+
 impl AppState {
     pub fn load(data_dir: PathBuf) -> Self {
         let mut nodes = read_json::<Vec<Node>>(&data_dir.join("nodes.json"));
         let mut subs = read_json::<Vec<Subscription>>(&data_dir.join("subscriptions.json"));
         let settings = read_json::<Settings>(&data_dir.join("settings.json"));
-        let migrated = migrate_legacy_subs(&mut nodes, &mut subs);
+        let migrated = migrate_legacy_subs(&mut nodes, &mut subs) | dedupe_ids(&mut nodes);
         let state = Self {
             data_dir,
             nodes: Mutex::new(nodes),
@@ -191,6 +206,17 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn duplicate_node_ids_are_repaired() {
+        let node = |id: &str| Node { id: id.into(), ..Node::default() };
+        let mut nodes = vec![node("a"), node("a"), node("a"), node("b")];
+        assert!(dedupe_ids(&mut nodes));
+        let ids: std::collections::HashSet<_> = nodes.iter().map(|n| n.id.clone()).collect();
+        assert_eq!(ids.len(), 4);
+        assert_eq!(nodes[0].id, "a"); // the first keeps its id
+        assert!(!dedupe_ids(&mut nodes));
+    }
 
     #[test]
     fn legacy_url_subscriptions_become_named_subs() {

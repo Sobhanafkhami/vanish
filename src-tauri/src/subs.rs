@@ -125,9 +125,15 @@ pub async fn refresh(app: &AppHandle, sub_id: &str) -> Result<ImportResult, Stri
     {
         let mut nodes = state.nodes.lock().unwrap();
         let old: Vec<Node> = nodes.iter().filter(|n| n.subscription.as_deref() == Some(sub_id)).cloned().collect();
+        // Panels often list many nodes on one server:port, so the address alone is not an identity.
+        // Match on the full outbound (or name + address), and use each old node at most once.
+        let mut taken = vec![false; old.len()];
         for n in &mut parsed {
             n.subscription = Some(sub_id.to_string());
-            if let Some(o) = old.iter().find(|o| o.server == n.server && o.port == n.port && o.protocol == n.protocol) {
+            let same = |o: &Node| o.outbound == n.outbound || (o.name == n.name && o.server == n.server && o.port == n.port && o.protocol == n.protocol);
+            if let Some(i) = old.iter().enumerate().position(|(i, o)| !taken[i] && same(o)) {
+                taken[i] = true;
+                let o = &old[i];
                 n.id = o.id.clone();
                 n.latency = o.latency;
                 n.delay = o.delay;
