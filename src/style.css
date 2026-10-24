@@ -2,61 +2,49 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --obsidian: #0a0b10;
-  --cyan: #00f2fe;
-  --violet: #7000ff;
-}
-
 html,
 body,
 #app {
   height: 100%;
   margin: 0;
   background: transparent; /* the window itself is transparent (Mica) */
-  color: #dfe6f3;
+  color: #e4ebe6;
   font-family: Inter, "Segoe UI", system-ui, sans-serif;
   overflow: hidden;
   user-select: none;
 }
 
 @layer components {
-  /* Frosted panel with a thin neon edge. */
-  .glass {
-    @apply relative rounded-2xl border border-white/10 bg-white/[0.04] backdrop-blur-xl;
-    box-shadow: inset 0 0 0 1px rgba(0, 242, 254, 0.06), 0 0 24px rgba(112, 0, 255, 0.08);
+  .panel {
+    @apply relative rounded-2xl border border-ink-line bg-ink-raised transition-colors;
   }
-  .glass::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    padding: 1px;
-    background: linear-gradient(135deg, rgba(0, 242, 254, 0.55), rgba(112, 0, 255, 0.15) 45%, rgba(112, 0, 255, 0.5));
-    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-    -webkit-mask-composite: xor;
-    mask-composite: exclude;
-    pointer-events: none;
-    opacity: 0.55;
-    transition: opacity 0.3s;
-  }
-  .glass:hover::before,
-  .glass.active::before {
-    opacity: 1;
+  .panel.active {
+    @apply border-accent/40;
   }
   .hud-label {
-    @apply font-mono text-[10px] uppercase tracking-[0.2em] text-white/40;
+    @apply font-mono text-[10px] uppercase tracking-[0.2em] text-white/50;
   }
   .btn {
-    @apply inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-white/80 transition hover:border-cyan-neon/50 hover:text-white hover:shadow-glow-cyan disabled:opacity-40;
+    @apply inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-ink-line bg-white/[0.03] px-3 py-1.5 text-xs text-white/80 transition hover:border-accent/50 hover:text-white disabled:cursor-not-allowed disabled:opacity-40;
   }
+}
+
+button {
+  cursor: pointer;
+}
+button:disabled {
+  cursor: not-allowed;
+}
+:focus-visible {
+  outline: 2px solid #4ade80;
+  outline-offset: 2px;
 }
 
 ::-webkit-scrollbar {
   width: 6px;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(0, 242, 254, 0.25);
+  background: rgba(74, 222, 128, 0.25);
   border-radius: 3px;
 }
 input,
@@ -72,4 +60,14 @@ textarea {
 .fade-leave-to {
   opacity: 0;
   transform: translateY(6px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

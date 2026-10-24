@@ -8,10 +8,10 @@ const win = getCurrentWindow();
 <template>
   <header
     data-tauri-drag-region
-    class="flex h-10 shrink-0 items-center justify-between border-b border-white/10 bg-black/30 pl-4 backdrop-blur-xl"
+    class="flex h-10 shrink-0 items-center justify-between border-b border-ink-line bg-black/40 pl-4"
   >
     <div data-tauri-drag-region class="pointer-events-none flex items-center gap-2">
-      <span class="h-2 w-2 rounded-full bg-cyan-neon shadow-glow-cyan"></span>
+      <span class="h-2 w-2 rounded-full bg-accent"></span>
       <span class="font-mono text-xs font-semibold uppercase tracking-[0.3em] text-white/80">Vanish</span>
     </div>
     <div class="flex h-full">
