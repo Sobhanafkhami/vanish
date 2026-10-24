@@ -26,6 +26,11 @@ export interface Subscription {
   download: number | null;
   total: number | null;
   expire: number | null;
+  /** Remaining bytes when the panel only publishes what is left. */
+  remaining: number | null;
+  remaining_peak: number | null;
+  /** "header" or "remarks". */
+  info_source: string | null;
 }
 
 export interface ExitInfo {
@@ -46,6 +51,12 @@ export interface SpeedResult {
   jitter_ms: number;
   download_mbps: number;
   upload_mbps: number;
+  server: string;
+  ip: string;
+  isp: string;
+  location: string;
+  /** Why a phase produced no number (blocked server, ...). */
+  notes: string[];
 }
 
 export interface Check {

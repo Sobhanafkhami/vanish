@@ -1,4 +1,4 @@
-//! Named subscriptions: fetching, usage info from `subscription-userinfo`, and periodic refresh.
+//! Named subscriptions: fetching, traffic/expiry info (see usage.rs), and periodic refresh.
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -8,6 +8,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use crate::{
     nodes::{self, Node},
     state::AppState,
+    usage::{self, Usage},
 };
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -22,11 +23,38 @@ pub struct Subscription {
     pub total: Option<u64>,
     /// Unix seconds.
     pub expire: Option<u64>,
+    /// Remaining bytes, for panels that only publish what is left (no total / used split).
+    #[serde(default)]
+    pub remaining: Option<u64>,
+    /// Largest `remaining` seen since the last renewal; stands in for the total when none is published.
+    #[serde(default)]
+    pub remaining_peak: Option<u64>,
+    /// Where the numbers came from: "header" or "remarks".
+    #[serde(default)]
+    pub info_source: Option<String>,
 }
 
 impl Subscription {
     pub fn new(name: String, url: String) -> Self {
         Self { id: uuid::Uuid::new_v4().to_string(), name, url, ..Self::default() }
+    }
+
+    /// Replaces the stored usage with a fresh reading (stale numbers must not outlive a panel that stopped sending them).
+    fn apply_usage(&mut self, reading: Option<(Usage, &'static str)>) {
+        let previous = self.remaining;
+        let (u, source) = match reading {
+            Some((u, source)) => (u, Some(source.to_string())),
+            None => (Usage::default(), None),
+        };
+        (self.upload, self.download, self.total, self.expire) = (u.upload, u.download, u.total, u.expire);
+        self.remaining = u.remaining;
+        self.info_source = source;
+        self.remaining_peak = match (u.remaining, previous) {
+            (None, _) => None,
+            // It went up: the plan was renewed, start a new baseline.
+            (Some(now), Some(before)) if now > before => Some(now),
+            (Some(now), _) => Some(self.remaining_peak.unwrap_or(0).max(now)),
+        };
     }
 }
 
@@ -38,21 +66,6 @@ pub struct ImportResult {
 
 fn now() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
-}
-
-/// `upload=1; download=2; total=3; expire=4`
-fn parse_userinfo(h: &str, sub: &mut Subscription) {
-    for part in h.split(';') {
-        let Some((k, v)) = part.split_once('=') else { continue };
-        let Ok(v) = v.trim().parse::<u64>() else { continue };
-        match k.trim() {
-            "upload" => sub.upload = Some(v),
-            "download" => sub.download = Some(v),
-            "total" => sub.total = Some(v),
-            "expire" => sub.expire = Some(v).filter(|e| *e > 0),
-            _ => {}
-        }
-    }
 }
 
 /// Panels pick the response format from the User-Agent: a "sing-box" UA often gets an empty body or a
@@ -70,7 +83,11 @@ async fn fetch(url: &str, user_agent: &str) -> Result<(String, Option<String>), 
         .await
         .and_then(|r| r.error_for_status())
         .map_err(|e| e.to_string())?;
-    let info = resp.headers().get("subscription-userinfo").and_then(|v| v.to_str().ok()).map(str::to_string);
+    let info = ["subscription-userinfo", "x-subscription-userinfo"]
+        .iter()
+        .find_map(|h| resp.headers().get(*h))
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
     let body = resp.text().await.map_err(|e| e.to_string())?;
     Ok((body, info))
 }
@@ -82,12 +99,14 @@ pub async fn refresh(app: &AppHandle, sub_id: &str) -> Result<ImportResult, Stri
     let mut sub = state.subs.lock().unwrap().iter().find(|s| s.id == sub_id).cloned().ok_or("unknown subscription")?;
     let mut last_err = String::from("empty response from server");
     let mut found = None;
+    let mut header = None; // keep the first usage header any attempt returned
     for ua in USER_AGENTS {
         match fetch(&sub.url, ua).await {
             Ok((body, info)) => {
+                header = header.or(info);
                 let (parsed, errors) = nodes::parse_text(&body);
                 if !parsed.is_empty() {
-                    found = Some((parsed, errors, info));
+                    found = Some((parsed, errors));
                     break;
                 }
                 last_err = if body.trim().is_empty() {
@@ -99,10 +118,8 @@ pub async fn refresh(app: &AppHandle, sub_id: &str) -> Result<ImportResult, Stri
             Err(e) => last_err = e,
         }
     }
-    let Some((mut parsed, errors, info)) = found else { return Err(last_err) };
-    if let Some(info) = info {
-        parse_userinfo(&info, &mut sub);
-    }
+    let Some((mut parsed, errors)) = found else { return Err(last_err) };
+    sub.apply_usage(usage::combine(header.as_deref().map(usage::from_header), usage::from_names(parsed.iter().map(|n| n.name.as_str()))));
     sub.updated_at = Some(now());
     let added = parsed.len();
     {
@@ -156,19 +173,5 @@ pub async fn refresh_loop(app: AppHandle) {
             }
         }
         tokio::time::sleep(Duration::from_secs(1800)).await;
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_userinfo_header() {
-        let mut s = Subscription::new("t".into(), "https://x".into());
-        parse_userinfo("upload=10; download=20; total=100; expire=1800000000", &mut s);
-        assert_eq!((s.upload, s.download, s.total, s.expire), (Some(10), Some(20), Some(100), Some(1_800_000_000)));
-        parse_userinfo("expire=0", &mut s);
-        assert_eq!(s.expire, None); // 0 means "never expires"
     }
 }

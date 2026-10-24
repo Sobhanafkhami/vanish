@@ -2,6 +2,7 @@
 import { computed, ref } from "vue";
 import { CircleCheck, CircleX, Info, Play, TriangleAlert } from "lucide-vue-next";
 import Modal from "./Modal.vue";
+import SpeedGauge from "./SpeedGauge.vue";
 import { runDiagnostics, runSpeedTest, store } from "../stores/app";
 
 const tab = ref<"speed" | "leak">("speed");
@@ -10,28 +11,51 @@ const tabs = [
   { id: "leak", label: "Leak test" },
 ] as const;
 
-const steps = ["ping", "download", "upload"] as const;
-const stepIndex = computed(() => steps.indexOf(store.speed.phase as (typeof steps)[number]));
-const phaseLabel = computed(() => {
-  const p = store.speed.phase;
-  return p === "ping" ? "Measuring latency" : p === "download" ? "Download" : p === "upload" ? "Upload" : "";
+const sp = computed(() => store.speed);
+const r = computed(() => store.speed.result);
+const phases = ["ping", "download", "upload"] as const;
+const COLORS = { ping: "#4ade80", download: "#4ade80", upload: "#e4ebe6" } as const;
+
+const idle = computed(() => !sp.value.running && !r.value && !sp.value.error);
+const phaseKey = computed(() => (sp.value.running && sp.value.phase !== "done" && sp.value.phase !== "" ? sp.value.phase : "download"));
+const gaugeColor = computed(() => COLORS[phaseKey.value]);
+const gaugeValue = computed(() => {
+  if (sp.value.running) return phaseKey.value === "ping" ? 0 : sp.value.live;
+  return sp.value.partial.download ?? 0;
+});
+const caption = computed(() => (sp.value.running ? phaseKey.value.toUpperCase() : r.value ? "DOWNLOAD" : ""));
+
+const fmt = (n: number | null, d = 1) => (n === null ? "—" : n.toFixed(d));
+const cards = computed(() =>
+  phases.map((p) => {
+    const active = sp.value.running && sp.value.phase === p;
+    const done = sp.value.partial[p];
+    const v = p === "ping" ? done : active ? sp.value.live : done;
+    return {
+      p,
+      active,
+      label: p === "ping" ? "Ping" : p === "download" ? "Download" : "Upload",
+      value: p === "ping" ? fmt(v, 0) : fmt(v === null || (!active && v === 0 && !r.value) ? null : v),
+      unit: p === "ping" ? "ms" : "Mbit/s",
+    };
+  }),
+);
+
+// Live chart of the current phase.
+const CHART_W = 300;
+const CHART_H = 56;
+const chart = computed(() => {
+  const d = sp.value.samples;
+  if (d.length < 2) return { line: "", area: "" };
+  const max = Math.max(1, ...d);
+  const step = CHART_W / (Math.max(d.length, 30) - 1);
+  const pts = d.map((v, i) => `${(i * step).toFixed(1)},${(CHART_H - 3 - (v / max) * (CHART_H - 6)).toFixed(1)}`);
+  return { line: "M" + pts.join(" L"), area: `M${pts.join(" L")} L${((d.length - 1) * step).toFixed(1)},${CHART_H} L0,${CHART_H} Z` };
 });
 
-const fmt = (n: number, d = 1) => n.toFixed(d);
-const r = computed(() => store.speed.result);
-const big = computed(() => {
-  if (store.speed.running) return store.speed.phase === "ping" ? "0.0" : fmt(store.speed.live);
-  return r.value ? fmt(r.value.download_mbps) : "0.0";
-});
-const metrics = computed(() => [
-  { k: "Ping", v: r.value ? fmt(r.value.ping_ms, 0) : "—", u: "ms" },
-  { k: "Jitter", v: r.value ? fmt(r.value.jitter_ms, 0) : "—", u: "ms" },
-  { k: "Download", v: r.value ? fmt(r.value.download_mbps) : "—", u: "Mbit/s" },
-  { k: "Upload", v: r.value ? fmt(r.value.upload_mbps) : "—", u: "Mbit/s" },
-]);
 const hint = computed(() => {
   if (r.value) return r.value.via_tunnel ? "Measured through the active tunnel." : "Measured on your direct connection (not connected).";
-  return store.status.running ? "Runs through the active tunnel. Takes about 20 seconds." : "Not connected: this tests your direct connection. Takes about 20 seconds.";
+  return store.status.running ? "Runs through the active tunnel. Takes about 25 seconds." : "Not connected: this tests your direct connection. Takes about 25 seconds.";
 });
 
 const icons = { ok: CircleCheck, warn: TriangleAlert, fail: CircleX, info: Info } as const;
@@ -57,32 +81,60 @@ const word = { ok: "OK", warn: "Warning", fail: "Problem", info: "Info" } as con
 
     <!-- speed test -->
     <div v-if="tab === 'speed'">
-      <div class="flex flex-col items-center gap-1 py-4">
-        <div class="font-mono text-5xl font-semibold text-white" aria-live="polite">{{ big }}</div>
-        <div class="text-xs text-white/50">Mbit/s {{ phaseLabel ? "· " + phaseLabel : "" }}</div>
-        <div class="mt-3 flex gap-2" aria-hidden="true">
-          <span
-            v-for="(s, i) in steps"
-            :key="s"
-            class="h-1 w-12 rounded-full transition-colors"
-            :class="store.speed.running && i <= stepIndex ? 'bg-accent' : r && !store.speed.running ? 'bg-accent/60' : 'bg-white/10'"
-          ></span>
-        </div>
+      <div class="mb-2 flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-[11px] text-white/55">
+        <span>{{ r?.server ?? "Cloudflare" }}</span>
+        <span>{{ (r ? r.via_tunnel : store.status.running) ? "via tunnel" : "direct connection" }}</span>
+        <template v-if="r">
+          <span v-if="r.isp">{{ r.isp }}</span>
+          <span v-if="r.location">{{ r.location }}</span>
+          <span v-if="r.ip" class="font-mono" style="user-select: text">{{ r.ip }}</span>
+        </template>
       </div>
 
-      <div class="grid grid-cols-4 gap-3 text-center">
-        <div v-for="m in metrics" :key="m.k" class="rounded-xl border border-ink-line bg-black/30 px-2 py-3">
-          <div class="hud-label">{{ m.k }}</div>
-          <div class="mt-1 font-mono text-lg text-white">{{ m.v }}</div>
-          <div class="text-[10px] text-white/45">{{ m.u }}</div>
-        </div>
+      <!-- idle: big GO like Speedtest.net -->
+      <div v-if="idle" class="grid place-items-center py-6">
+        <button
+          class="grid h-40 w-40 place-items-center rounded-full border-2 border-accent/60 bg-accent/5 text-4xl font-semibold tracking-[0.25em] text-accent-soft shadow-[0_0_40px_rgba(34,197,94,.25)] transition hover:bg-accent/15 hover:shadow-[0_0_56px_rgba(34,197,94,.4)]"
+          aria-label="Start speed test"
+          @click="runSpeedTest"
+        >
+          GO
+        </button>
       </div>
 
-      <p v-if="store.speed.error" class="mt-3 rounded-lg border border-red-500/40 p-2 font-mono text-xs text-red-300" role="alert">{{ store.speed.error }}</p>
-      <p class="mt-3 text-xs text-white/50">{{ hint }}</p>
-      <button class="btn mt-3" :disabled="store.speed.running" @click="runSpeedTest">
-        <Play :size="13" /> {{ store.speed.running ? "Testing…" : r ? "Run again" : "Start" }}
-      </button>
+      <template v-else>
+        <SpeedGauge :value="gaugeValue" :color="gaugeColor" :caption="caption" />
+
+        <div class="mt-1 grid grid-cols-3 gap-3 text-center">
+          <div
+            v-for="c in cards"
+            :key="c.p"
+            class="rounded-xl border bg-black/30 px-2 py-3 transition-colors"
+            :class="c.active ? 'border-accent/60' : 'border-ink-line'"
+          >
+            <div class="hud-label">{{ c.label }}</div>
+            <div class="mt-1 font-mono text-xl text-white">{{ c.value }}</div>
+            <div class="text-[10px] text-white/45">{{ c.unit }}<template v-if="c.p === 'ping' && r"> · jitter {{ r.jitter_ms.toFixed(0) }} ms</template></div>
+          </div>
+        </div>
+
+        <svg v-if="sp.running && chart.line" :viewBox="`0 0 ${CHART_W} ${CHART_H}`" class="mt-3 h-14 w-full" preserveAspectRatio="none" aria-hidden="true">
+          <path :d="chart.area" :fill="gaugeColor" fill-opacity="0.12" />
+          <path :d="chart.line" fill="none" :stroke="gaugeColor" stroke-width="1.5" vector-effect="non-scaling-stroke" />
+        </svg>
+      </template>
+
+      <p v-if="sp.error" class="mt-3 rounded-lg border border-red-500/40 p-2 font-mono text-xs text-red-300" role="alert">{{ sp.error }}</p>
+      <ul v-if="r?.notes.length" class="mt-3 space-y-1">
+        <li v-for="n in r.notes" :key="n" class="flex items-start gap-2 text-xs text-yellow-300" role="alert"><TriangleAlert :size="13" class="mt-0.5 shrink-0" /> {{ n }}</li>
+      </ul>
+
+      <div class="mt-3 flex items-center justify-between gap-3">
+        <p class="text-xs text-white/50">{{ hint }}</p>
+        <button v-if="!idle" class="btn shrink-0" :disabled="sp.running" @click="runSpeedTest">
+          <Play :size="13" /> {{ sp.running ? "Testing…" : "Run again" }}
+        </button>
+      </div>
     </div>
 
     <!-- leak test -->

@@ -41,6 +41,10 @@ export const store = reactive({
     running: false,
     phase: "" as "" | "ping" | "download" | "upload" | "done",
     live: 0,
+    /** Raw readings of the current phase, for the live chart. */
+    samples: [] as number[],
+    /** Finished phases of the running test (ms for ping, Mbit/s otherwise). */
+    partial: { ping: null as number | null, download: null as number | null, upload: null as number | null },
     result: null as SpeedResult | null,
     error: "",
   },
@@ -108,9 +112,23 @@ export async function init() {
     if (n) n.delay = e.payload.delay;
   });
   await listen("usage-changed", () => refreshNodes());
-  await listen<{ phase: "ping" | "download" | "upload" | "done"; value: number }>("speedtest", (e) => {
-    store.speed.phase = e.payload.phase;
-    if (e.payload.phase === "download" || e.payload.phase === "upload") store.speed.live = e.payload.value;
+  await listen<{ phase: "ping" | "download" | "upload" | "done"; value: number; done: boolean }>("speedtest", (e) => {
+    const { phase, value, done } = e.payload;
+    if (phase === "done") return;
+    const sp = store.speed;
+    if (sp.phase !== phase) {
+      sp.phase = phase;
+      sp.samples = [];
+      sp.live = 0;
+    }
+    if (done) {
+      sp.partial[phase] = value;
+      sp.live = phase === "ping" ? 0 : value;
+    } else if (phase !== "ping") {
+      sp.live = sp.live ? sp.live * 0.6 + value * 0.4 : value; // smooth the needle
+      sp.samples.push(value);
+      if (sp.samples.length > 60) sp.samples.shift();
+    }
   });
   await listen<UpdateInfo>("update-available", (e) => (store.update = e.payload));
   api.appVersion().then((v) => (store.version = v));
@@ -279,9 +297,20 @@ export async function realDelay(ids: string[]) {
 
 export async function runSpeedTest() {
   if (store.speed.running) return;
-  Object.assign(store.speed, { running: true, phase: "ping", live: 0, result: null, error: "" });
+  Object.assign(store.speed, {
+    running: true,
+    phase: "ping",
+    live: 0,
+    samples: [],
+    partial: { ping: null, download: null, upload: null },
+    result: null,
+    error: "",
+  });
   try {
-    store.speed.result = await api.speedTest();
+    const r = await api.speedTest();
+    store.speed.result = r;
+    store.speed.partial = { ping: r.ping_ms, download: r.download_mbps, upload: r.upload_mbps };
+    store.speed.live = r.download_mbps;
   } catch (e) {
     store.speed.error = String(e);
   } finally {

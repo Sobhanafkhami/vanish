@@ -10,6 +10,7 @@ mod state;
 mod subs;
 mod tray;
 mod updater;
+mod usage;
 
 use tauri::{Manager, WindowEvent};
 

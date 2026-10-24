@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 const conf = JSON.parse(readFileSync("src-tauri/tauri.conf.json", "utf8"));
 const version = conf.version;
-const repo = "Sobhanafkhami/vanish";
+const repo = process.env.GITHUB_REPOSITORY ?? "Sobhanafkhami/vanish"; // set on GitHub Actions
 const dir = join("src-tauri", "target", "release", "bundle", "nsis");
 const installer = `Vanish_${version}_x64-setup.exe`;
 

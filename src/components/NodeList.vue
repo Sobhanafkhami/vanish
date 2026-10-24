@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from "vue";
 import { Activity, ArrowDown, ArrowDownUp, ArrowUp, Check, ClipboardPaste, Pencil, QrCode, RefreshCw, Search, Timer, Trash2, X, Zap } from "lucide-vue-next";
+import SubUsage from "./SubUsage.vue";
+import { fmtBytes, subUsage, usageTone } from "../lib/usage";
 import {
   addSubscription,
   connectFastest,
@@ -95,23 +97,6 @@ function delayText(d: number | null) {
   return d < 0 ? "timeout" : `${d} ms`;
 }
 
-function fmtBytes(b: number) {
-  const u = ["B", "KB", "MB", "GB", "TB"];
-  let i = 0;
-  while (b >= 1024 && i < u.length - 1) {
-    b /= 1024;
-    i++;
-  }
-  return `${b.toFixed(i > 1 ? 1 : 0)} ${u[i]}`;
-}
-const used = computed(() => (activeSub.value ? (activeSub.value.upload ?? 0) + (activeSub.value.download ?? 0) : 0));
-const usedPct = computed(() => (activeSub.value?.total ? Math.min(100, (used.value / activeSub.value.total) * 100) : 0));
-const expiry = computed(() => {
-  const e = activeSub.value?.expire;
-  if (!e) return null;
-  const days = Math.ceil((e * 1000 - Date.now()) / 86_400_000);
-  return days < 0 ? "expired" : `${days} day${days === 1 ? "" : "s"} left`;
-});
 const updatedText = computed(() => {
   const t = activeSub.value?.updated_at;
   return t ? new Date(t * 1000).toLocaleString() : "never";
@@ -229,6 +214,10 @@ async function deleteSub() {
         @click="store.activeTab = s.id"
       >
         {{ s.name }} <span class="ml-1 font-mono text-[10px] opacity-70">{{ countFor(s.id) }}</span>
+        <!-- remaining share at a glance -->
+        <span v-if="subUsage(s).remainingPct !== null" class="mt-1 block h-0.5 overflow-hidden rounded-full bg-white/10" aria-hidden="true">
+          <span class="block h-full rounded-full" :class="usageTone(subUsage(s).remainingPct)" :style="{ width: subUsage(s).remainingPct + '%' }"></span>
+        </span>
       </button>
     </div>
 
@@ -263,16 +252,8 @@ async function deleteSub() {
         </div>
       </div>
       <div class="mt-1 truncate font-mono text-[10px] text-white/45">{{ activeSub.url }}</div>
-      <div v-if="activeSub.total" class="mt-2">
-        <div class="h-1.5 overflow-hidden rounded-full bg-white/10">
-          <div class="h-full rounded-full bg-accent" :style="{ width: usedPct + '%' }"></div>
-        </div>
-        <div class="mt-1 flex justify-between font-mono text-[10px] text-white/55">
-          <span>{{ fmtBytes(used) }} / {{ fmtBytes(activeSub.total) }}</span>
-          <span v-if="expiry">{{ expiry }}</span>
-        </div>
-      </div>
-      <div class="mt-1 font-mono text-[10px] text-white/45">Updated {{ updatedText }}</div>
+      <SubUsage :sub="activeSub" />
+      <div class="mt-2 font-mono text-[10px] text-white/45">Updated {{ updatedText }}</div>
     </div>
 
     <div class="mb-3 flex gap-2">
