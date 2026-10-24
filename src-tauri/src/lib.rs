@@ -2,11 +2,14 @@ mod autostart;
 mod commands;
 mod config;
 mod engine;
+mod netcheck;
 mod nodes;
+mod probe;
 mod proxy;
 mod state;
 mod subs;
 mod tray;
+mod updater;
 
 use tauri::{Manager, WindowEvent};
 
@@ -16,6 +19,8 @@ pub fn run() {
         // A second launch must not spawn a second process: two instances would fight over
         // the data files and the sing-box ports. Focus the running one instead.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| tray::show_main(app)))
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(dir.join("bin"))?;
@@ -43,6 +48,7 @@ pub fn run() {
                 });
             }
             tauri::async_runtime::spawn(subs::refresh_loop(handle.clone()));
+            tauri::async_runtime::spawn(updater::check_loop(handle.clone()));
             let connect = {
                 let st = handle.state::<state::AppState>();
                 let s = st.settings.lock().unwrap();
@@ -74,6 +80,15 @@ pub fn run() {
             commands::remove_subscription,
             commands::pick_fastest,
             commands::exit_info,
+            commands::real_delay,
+            commands::speed_test,
+            commands::diagnostics,
+            commands::reset_settings,
+            commands::list_running_apps,
+            commands::pick_app_exe,
+            commands::app_version,
+            commands::check_update,
+            commands::install_update,
             commands::remove_node,
             commands::get_settings,
             commands::set_settings,
@@ -88,3 +103,4 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running Vanish");
 }
+

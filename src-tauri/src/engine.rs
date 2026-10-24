@@ -38,7 +38,7 @@ fn binary_name() -> &'static str {
 }
 
 /// Lookup order: explicit `core_path`, app data `bin/`, bundled resource, next to the exe, PATH.
-fn resolve_binary(app: &AppHandle, state: &AppState) -> PathBuf {
+pub fn resolve_binary(app: &AppHandle, state: &AppState) -> PathBuf {
     if let Some(p) = state.settings.lock().unwrap().core_path.clone().filter(|p| !p.is_empty()) {
         return p.into();
     }
@@ -54,7 +54,7 @@ fn resolve_binary(app: &AppHandle, state: &AppState) -> PathBuf {
     candidates.into_iter().find(|c| c.exists()).unwrap_or_else(|| binary_name().into())
 }
 
-fn free_port(preferred: u16, avoid: Option<u16>) -> u16 {
+pub fn free_port(preferred: u16, avoid: Option<u16>) -> u16 {
     let ok = |p: u16| Some(p) != avoid && std::net::TcpListener::bind(("127.0.0.1", p)).is_ok();
     if ok(preferred) {
         return preferred;
@@ -192,6 +192,7 @@ pub async fn stop(app: &AppHandle) -> Result<CoreStatus, String> {
         let _ = child.kill().await;
     }
     *state.active_node.lock().unwrap() = None;
+    let _ = state.save_nodes(); // persist the usage counters
     emit_state(app);
     Ok(status(app))
 }
@@ -200,6 +201,9 @@ async fn traffic_loop(app: AppHandle, api_port: u16) {
     let client = reqwest::Client::builder().no_proxy().build().unwrap_or_default();
     let url = format!("http://127.0.0.1:{api_port}/connections");
     let mut prev: Option<(u64, u64, Instant)> = None;
+    // Totals already credited to the active node (the core's counters restart with every start).
+    let mut credited = (0u64, 0u64);
+    let mut ticks = 0u32;
     loop {
         sleep(Duration::from_secs(1)).await;
         let Ok(resp) = client.get(&url).timeout(Duration::from_secs(2)).send().await else { continue };
@@ -214,6 +218,22 @@ async fn traffic_loop(app: AppHandle, api_port: u16) {
             None => (0, 0),
         };
         prev = Some((up_total, down_total, now));
+
+        let state = app.state::<AppState>();
+        let active = state.active_node.lock().unwrap().clone();
+        if let Some(id) = active {
+            let (du, dd) = (up_total.saturating_sub(credited.0), down_total.saturating_sub(credited.1));
+            if let Some(n) = state.nodes.lock().unwrap().iter_mut().find(|n| n.id == id) {
+                n.up_total += du;
+                n.down_total += dd;
+            }
+            credited = (up_total, down_total);
+            ticks += 1;
+            if ticks % 15 == 0 {
+                let _ = state.save_nodes();
+                let _ = app.emit("usage-changed", ());
+            }
+        }
         let _ = app.emit("traffic", Traffic { up, down, up_total, down_total });
     }
 }
@@ -328,6 +348,32 @@ pub struct ExitInfo {
     pub ip: String,
     pub country: String,
     pub country_code: String,
+    pub region: String,
+    pub city: String,
+    pub zip: String,
+    pub host: String,
+    pub isp: String,
+    pub timezone: String,
+}
+
+pub const GEO_URL: &str = "http://ip-api.com/json/?fields=status,query,country,countryCode,regionName,city,zip,isp,reverse,timezone";
+
+pub fn parse_geo(v: &Value) -> Result<ExitInfo, String> {
+    if v["status"] != "success" {
+        return Err("exit IP lookup failed".into());
+    }
+    let s = |k: &str| v[k].as_str().unwrap_or_default().to_string();
+    Ok(ExitInfo {
+        ip: s("query"),
+        country: s("country"),
+        country_code: s("countryCode"),
+        region: s("regionName"),
+        city: s("city"),
+        zip: s("zip"),
+        host: s("reverse"),
+        isp: s("isp"),
+        timezone: s("timezone"),
+    })
 }
 
 /// Public IP and country as seen from outside, through the running core.
@@ -338,16 +384,12 @@ pub async fn exit_info(port: u16) -> Result<ExitInfo, String> {
         .build()
         .map_err(|e| e.to_string())?;
     let v: Value = client
-        .get("http://ip-api.com/json/?fields=status,query,country,countryCode")
+        .get(GEO_URL)
         .send()
         .await
         .map_err(|e| e.to_string())?
         .json()
         .await
         .map_err(|e| e.to_string())?;
-    if v["status"] != "success" {
-        return Err("exit IP lookup failed".into());
-    }
-    let s = |k: &str| v[k].as_str().unwrap_or_default().to_string();
-    Ok(ExitInfo { ip: s("query"), country: s("country"), country_code: s("countryCode") })
+    parse_geo(&v)
 }

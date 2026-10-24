@@ -47,6 +47,18 @@
     ],
     "resources": {
       "binaries/*": "binaries/"
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDlCQTEyQjFDRTU5OTBFMTUKUldRVkRwbmxIQ3VobStndFZPWW9aTXBIR2VBeFpWRTRrLzJNT1BoWHlkbm9pOWZnQ3JuM3ZvUXYK",
+      "endpoints": [
+        "https://github.com/Sobhanafkhami/vanish/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }

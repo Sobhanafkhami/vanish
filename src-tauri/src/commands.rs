@@ -5,9 +5,12 @@ use tauri::{AppHandle, State};
 use crate::{
     autostart,
     engine::{self, CoreStatus, ExitInfo},
+    netcheck::{self, Diagnostics, SpeedResult},
     nodes::{self, Node},
+    probe,
     state::{AppState, Settings},
     subs::{self, ImportResult, Subscription},
+    updater::{self, UpdateInfo},
 };
 
 /// Selects the first node when nothing is selected yet, so a fresh import is immediately connectable.
@@ -221,7 +224,9 @@ pub async fn http_ping(state: State<'_, AppState>) -> Result<u32, String> {
     };
     let ms = engine::http_ping(port, &url).await?;
     if let Some(id) = state.active_node.lock().unwrap().clone() {
-        store_latency(&state, &id, Some(ms));
+        if let Some(n) = state.nodes.lock().unwrap().iter_mut().find(|n| n.id == id) {
+            n.delay = Some(ms as i32);
+        }
     }
     Ok(ms)
 }
@@ -253,4 +258,109 @@ pub async fn exit_info(state: State<'_, AppState>) -> Result<ExitInfo, String> {
     }
     let port = state.active_ports.lock().unwrap().0;
     engine::exit_info(port).await
+}
+
+/// Real HTTP delay through each node (separate headless core), streamed as `node-delay` events.
+#[tauri::command]
+pub async fn real_delay(ids: Vec<String>, app: AppHandle) -> Result<(), String> {
+    probe::real_delay(&app, ids).await
+}
+
+#[tauri::command]
+pub async fn speed_test(app: AppHandle) -> Result<SpeedResult, String> {
+    netcheck::speed_test(&app).await
+}
+
+#[tauri::command]
+pub async fn diagnostics(app: AppHandle) -> Result<Diagnostics, String> {
+    netcheck::diagnostics(&app).await
+}
+
+/// Back to factory settings. Nodes, subscriptions and the selected node are kept.
+#[tauri::command]
+pub fn reset_settings(state: State<'_, AppState>) -> Result<Settings, String> {
+    let was_autostart = state.settings.lock().unwrap().autostart;
+    if was_autostart {
+        autostart::set(false)?;
+    }
+    let fresh = {
+        let mut s = state.settings.lock().unwrap();
+        let selected = s.selected_node.take();
+        *s = Settings { selected_node: selected, ..Settings::default() };
+        s.clone()
+    };
+    state.save_settings()?;
+    Ok(fresh)
+}
+
+#[derive(serde::Serialize)]
+pub struct RunningApp {
+    pub name: String,
+    pub title: String,
+}
+
+/// Programs that currently have a window (so the list is apps, not hundreds of services).
+#[tauri::command]
+pub async fn list_running_apps() -> Result<Vec<RunningApp>, String> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let out = tokio::task::spawn_blocking(|| {
+            std::process::Command::new("tasklist").args(["/v", "/fo", "csv", "/nh"]).creation_flags(0x0800_0000).output()
+        })
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
+        let text = String::from_utf8_lossy(&out.stdout);
+        let mut apps: Vec<RunningApp> = vec![];
+        for line in text.lines() {
+            // "Image","PID","Session","Session#","Mem","Status","User","CPU","Window title"
+            let cols: Vec<&str> = line.trim().trim_matches('"').split("\",\"").collect();
+            let (Some(name), Some(title)) = (cols.first(), cols.last()) else { continue };
+            let lower = name.to_ascii_lowercase();
+            if cols.len() < 9 || *title == "N/A" || title.is_empty() || lower == "vanish.exe" || lower == "sing-box.exe" {
+                continue;
+            }
+            if !apps.iter().any(|a| a.name.eq_ignore_ascii_case(name)) {
+                apps.push(RunningApp { name: name.to_string(), title: title.to_string() });
+            }
+        }
+        apps.sort_by_key(|a| a.name.to_ascii_lowercase());
+        Ok(apps)
+    }
+    #[cfg(not(windows))]
+    Err("listing running apps is only implemented for Windows".into())
+}
+
+/// Native file dialog; returns the chosen program's file name (what sing-box matches on).
+#[tauri::command]
+pub async fn pick_app_exe(app: AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let picked = tokio::task::spawn_blocking(move || {
+        let mut d = app.dialog().file().set_title("Choose an application");
+        if cfg!(windows) {
+            d = d.add_filter("Applications", &["exe"]);
+        }
+        d.blocking_pick_file()
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(picked
+        .and_then(|f| f.into_path().ok())
+        .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned())))
+}
+
+#[tauri::command]
+pub fn app_version(app: AppHandle) -> String {
+    app.package_info().version.to_string()
+}
+
+#[tauri::command]
+pub async fn check_update(app: AppHandle) -> Result<Option<UpdateInfo>, String> {
+    updater::check(&app).await
+}
+
+#[tauri::command]
+pub async fn install_update(app: AppHandle) -> Result<(), String> {
+    updater::install(&app).await
 }

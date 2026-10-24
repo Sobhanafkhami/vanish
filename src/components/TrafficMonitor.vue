@@ -26,7 +26,7 @@ const upPath = computed(() => path(store.upHistory));
 </script>
 
 <template>
-  <div class="panel p-4">
+  <div class="panel shrink-0 p-4">
     <div class="mb-3 flex items-center justify-between">
       <span class="hud-label">Live traffic</span>
       <span class="hud-label">peak {{ fmt(scale) }}</span>

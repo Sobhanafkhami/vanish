@@ -26,6 +26,14 @@ pub struct Node {
     /// Original share link (when imported from one), used for QR export.
     #[serde(default)]
     pub link: Option<String>,
+    /// Lifetime bytes sent / received through this node.
+    #[serde(default)]
+    pub up_total: u64,
+    #[serde(default)]
+    pub down_total: u64,
+    /// Real HTTP delay in ms; -1 = test failed, None = never tested.
+    #[serde(default)]
+    pub delay: Option<i32>,
 }
 
 type Query = HashMap<String, String>;
@@ -55,6 +63,9 @@ fn node_from_outbound(name: String, outbound: Value) -> Result<Node, String> {
         latency: None,
         subscription: None,
         link: None,
+        up_total: 0,
+        down_total: 0,
+        delay: None,
     })
 }
 

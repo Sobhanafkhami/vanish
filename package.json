@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "fetch-core": "node scripts/fetch-core.mjs",
-    "build:app": "npm run fetch-core && tauri build"
+    "build:app": "npm run fetch-core && tauri build",
+    "release": "npm run build:app && node scripts/make-latest-json.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.1.1",

@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from "vue";
-import { Activity, ArrowDownUp, Check, ClipboardPaste, Pencil, QrCode, RefreshCw, Search, Trash2, X, Zap } from "lucide-vue-next";
+import { Activity, ArrowDown, ArrowDownUp, ArrowUp, Check, ClipboardPaste, Pencil, QrCode, RefreshCw, Search, Timer, Trash2, X, Zap } from "lucide-vue-next";
 import {
   addSubscription,
   connectFastest,
   importLinks,
   pingAll,
+  realDelay,
   refreshSubscription,
   removeNode,
   removeSubscription,
@@ -73,7 +74,9 @@ const visible = computed(() => {
   let list = store.nodes.filter((n) => (tab === "all" ? true : tab === "manual" ? !n.subscription : n.subscription === tab));
   if (q) list = list.filter((n) => `${n.name} ${n.server} ${n.protocol}`.toLowerCase().includes(q));
   if (sortByPing.value) {
-    list = [...list].sort((a, b) => (a.latency ?? Infinity) - (b.latency ?? Infinity));
+    // Prefer the real HTTP delay when there is one, fall back to the TCP ping.
+    const key = (n: (typeof list)[number]) => (n.delay !== null && n.delay > 0 ? n.delay : n.delay === -1 ? Infinity : (n.latency ?? Infinity));
+    list = [...list].sort((a, b) => key(a) - key(b));
   }
   return list;
 });
@@ -82,9 +85,14 @@ function countFor(subId: string) {
   return store.nodes.filter((n) => n.subscription === subId).length;
 }
 
-function latencyClass(ms: number | null) {
+function latencyClass(ms: number | null, good = 150, ok = 400) {
   if (ms === null) return "text-white/40";
-  return ms < 150 ? "text-accent-soft" : ms < 400 ? "text-yellow-300" : "text-red-400";
+  return ms < good ? "text-accent-soft" : ms < ok ? "text-yellow-300" : "text-red-400";
+}
+
+function delayText(d: number | null) {
+  if (d === null) return store.delayTesting ? "…" : "—";
+  return d < 0 ? "timeout" : `${d} ms`;
 }
 
 function fmtBytes(b: number) {
@@ -134,7 +142,15 @@ async function deleteSub() {
         <button class="btn" :disabled="store.busy || !store.nodes.length" title="Ping all, then select the quickest" @click="connectFastest">
           <Zap :size="13" /> Fastest
         </button>
-        <button class="btn" :disabled="store.busy || !store.nodes.length" @click="pingAll"><Activity :size="13" /> TCP ping</button>
+        <button class="btn" :disabled="store.busy || !store.nodes.length" title="TCP connect time to each server" @click="pingAll"><Activity :size="13" /> TCP ping</button>
+        <button
+          class="btn"
+          :disabled="store.delayTesting || !visible.length"
+          title="Real HTTP request through each node, like URL test"
+          @click="realDelay(visible.map((n) => n.id))"
+        >
+          <Timer :size="13" /> {{ store.delayTesting ? "Testing…" : "Real delay" }}
+        </button>
         <button class="btn" @click="showImport = !showImport"><ClipboardPaste :size="13" /> Import</button>
       </div>
     </div>
@@ -284,9 +300,18 @@ async function deleteSub() {
         <span class="rounded border border-ink-line px-1.5 py-0.5 font-mono text-[9px] uppercase text-accent-soft">{{ n.protocol }}</span>
         <div class="min-w-0 flex-1">
           <div class="truncate text-sm text-white/90">{{ n.name }}</div>
-          <div class="truncate font-mono text-[10px] text-white/45">{{ n.server }}:{{ n.port }}</div>
+          <div class="flex items-center gap-2 truncate font-mono text-[10px] text-white/45">
+            <span class="truncate">{{ n.server }}:{{ n.port }}</span>
+            <span v-if="n.up_total || n.down_total" class="flex shrink-0 items-center gap-1.5" title="Total traffic through this node">
+              <span class="flex items-center"><ArrowDown :size="9" />{{ fmtBytes(n.down_total) }}</span>
+              <span class="flex items-center"><ArrowUp :size="9" />{{ fmtBytes(n.up_total) }}</span>
+            </span>
+          </div>
         </div>
-        <span class="w-14 text-right font-mono text-xs" :class="latencyClass(n.latency)">{{ n.latency === null ? "—" : n.latency + " ms" }}</span>
+        <div class="w-16 shrink-0 text-right font-mono leading-tight">
+          <div class="text-xs" :class="latencyClass(n.delay !== null && n.delay < 0 ? 99999 : n.delay, 400, 800)" title="Real HTTP delay">{{ delayText(n.delay) }}</div>
+          <div class="text-[10px]" :class="latencyClass(n.latency)" title="TCP ping">tcp {{ n.latency === null ? "—" : n.latency }}</div>
+        </div>
         <button
           v-if="n.link"
           class="text-white/30 opacity-0 transition hover:text-white focus-visible:opacity-100 group-hover:opacity-100"

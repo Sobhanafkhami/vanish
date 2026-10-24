@@ -113,6 +113,9 @@ pub async fn refresh(app: &AppHandle, sub_id: &str) -> Result<ImportResult, Stri
             if let Some(o) = old.iter().find(|o| o.server == n.server && o.port == n.port && o.protocol == n.protocol) {
                 n.id = o.id.clone();
                 n.latency = o.latency;
+                n.delay = o.delay;
+                n.up_total = o.up_total;
+                n.down_total = o.down_total;
             }
         }
         nodes.retain(|n| n.subscription.as_deref() != Some(sub_id));

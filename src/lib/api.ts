@@ -10,6 +10,11 @@ export interface VanishNode {
   /** Owning subscription id; null for manually added nodes. */
   subscription: string | null;
   link: string | null;
+  /** Lifetime bytes through this node. */
+  up_total: number;
+  down_total: number;
+  /** Real HTTP delay in ms; -1 = failed, null = never tested. */
+  delay: number | null;
 }
 
 export interface Subscription {
@@ -27,6 +32,41 @@ export interface ExitInfo {
   ip: string;
   country: string;
   country_code: string;
+  region: string;
+  city: string;
+  zip: string;
+  host: string;
+  isp: string;
+  timezone: string;
+}
+
+export interface SpeedResult {
+  via_tunnel: boolean;
+  ping_ms: number;
+  jitter_ms: number;
+  download_mbps: number;
+  upload_mbps: number;
+}
+
+export interface Check {
+  label: string;
+  status: "ok" | "warn" | "fail" | "info";
+  detail: string;
+}
+
+export interface Diagnostics {
+  connected: boolean;
+  checks: Check[];
+}
+
+export interface RunningApp {
+  name: string;
+  title: string;
+}
+
+export interface UpdateInfo {
+  version: string;
+  notes: string | null;
 }
 
 export interface Settings {
@@ -69,6 +109,15 @@ export const api = {
   removeSubscription: (id: string) => invoke<void>("remove_subscription", { id }),
   pickFastest: () => invoke<string | null>("pick_fastest"),
   exitInfo: () => invoke<ExitInfo>("exit_info"),
+  realDelay: (ids: string[]) => invoke<void>("real_delay", { ids }),
+  speedTest: () => invoke<SpeedResult>("speed_test"),
+  diagnostics: () => invoke<Diagnostics>("diagnostics"),
+  resetSettings: () => invoke<Settings>("reset_settings"),
+  listRunningApps: () => invoke<RunningApp[]>("list_running_apps"),
+  pickAppExe: () => invoke<string | null>("pick_app_exe"),
+  appVersion: () => invoke<string>("app_version"),
+  checkUpdate: () => invoke<UpdateInfo | null>("check_update"),
+  installUpdate: () => invoke<void>("install_update"),
   removeNode: (id: string) => invoke<void>("remove_node", { id }),
   selectNode: (id: string) => invoke<void>("select_node", { id }),
   getSettings: () => invoke<Settings>("get_settings"),

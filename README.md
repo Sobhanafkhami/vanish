@@ -10,7 +10,7 @@ A lightweight, modern desktop client for **sing-box** / V2Ray connections — bu
 - System proxy set/restore on Windows (registry + WinINet refresh) and GNOME/Linux (`gsettings`).
 - Live traffic (via the sing-box Clash API), TCP ping for any node, real HTTP ping through the active tunnel.
 
-Not done yet: xray-core fallback (engine switch exists but returns an error), macOS system proxy, subscription auto-update, tests beyond the link-parser unit tests.
+Not done yet: xray-core fallback (engine switch exists but returns an error) and macOS system proxy.
 
 ## Run
 
@@ -31,3 +31,15 @@ npm run build:app
 Outputs: `src-tauri/target/release/vanish.exe` (portable; needs sing-box in `%APPDATA%\app.vanish.client\bin\` or next to it), plus NSIS and MSI installers in `src-tauri/target/release/bundle/` which ship sing-box inside.
 
 Core lookup order: `core_path` setting, app-data `bin/`, bundled resources, next to the exe, `PATH`. If the configured ports are taken (e.g. by Nekoray) Vanish picks free ones automatically. TUN mode needs administrator/root privileges. Data lives in `%APPDATA%\app.vanish.client` (`nodes.json`, `settings.json`); only one instance can run.
+
+## Releasing with in-app updates
+
+The app checks `https://github.com/Sobhanafkhami/vanish/releases/latest/download/latest.json` and installs signed updates. Update packages must be signed, so the build needs the private key (generated once with `npx tauri signer generate -w ~/.tauri/vanish-updater.key`; the matching public key is in `src-tauri/tauri.conf.json`). **Never commit the private key, and back it up: without it existing installs cannot be updated.**
+
+```powershell
+$env:TAURI_SIGNING_PRIVATE_KEY = "$HOME\.tauri\vanish-updater.key"
+npm run release            # build:app + writes latest.json next to the NSIS installer
+```
+
+Then create a GitHub release tagged `v<version>` and upload `Vanish_<version>_x64-setup.exe`, its `.sig`, and `latest.json` from `src-tauri/target/release/bundle/nsis/`. Bump `version` in `package.json`, `tauri.conf.json` and `Cargo.toml` first.
+

@@ -8,7 +8,7 @@ use crate::{
 };
 
 /// WireGuard moved from an outbound to an "endpoint" in recent sing-box releases.
-fn wireguard_endpoint(ob: &Value) -> Value {
+fn wireguard_endpoint(ob: &Value, tag: &str) -> Value {
     let mut peer = json!({
         "address": ob["server"],
         "port": ob["server_port"],
@@ -20,7 +20,7 @@ fn wireguard_endpoint(ob: &Value) -> Value {
     }
     let mut ep = json!({
         "type": "wireguard",
-        "tag": "proxy",
+        "tag": tag,
         "address": ob["local_address"],
         "private_key": ob["private_key"],
         "peers": [peer],
@@ -35,7 +35,7 @@ pub fn build(node: &Node, s: &Settings) -> Value {
     let mut outbounds = vec![json!({ "type": "direct", "tag": "direct" })];
     let mut endpoints: Vec<Value> = vec![];
     if node.outbound["type"] == "wireguard" {
-        endpoints.push(wireguard_endpoint(&node.outbound));
+        endpoints.push(wireguard_endpoint(&node.outbound, "proxy"));
     } else {
         let mut outbound = node.outbound.clone();
         outbound["tag"] = json!("proxy");
@@ -111,6 +111,31 @@ pub fn build(node: &Node, s: &Settings) -> Value {
     })
 }
 
+/// Headless config for the real-delay probe: every node as its own outbound (`n0`, `n1`, ...) plus the
+/// Clash API, no inbounds. Delay checks are made through that API, one per node.
+pub fn probe(nodes: &[&Node], api_port: u16) -> Value {
+    let mut outbounds = vec![json!({ "type": "direct", "tag": "direct" })];
+    let mut endpoints: Vec<Value> = vec![];
+    for (i, node) in nodes.iter().enumerate() {
+        let tag = format!("n{i}");
+        if node.outbound["type"] == "wireguard" {
+            endpoints.push(wireguard_endpoint(&node.outbound, &tag));
+        } else {
+            let mut ob = node.outbound.clone();
+            ob["tag"] = json!(tag);
+            outbounds.push(ob);
+        }
+    }
+    json!({
+        "log": { "level": "error", "timestamp": true },
+        "dns": { "servers": [{ "type": "local", "tag": "local" }] },
+        "outbounds": outbounds,
+        "endpoints": endpoints,
+        "route": { "final": "direct", "auto_detect_interface": true, "default_domain_resolver": "local" },
+        "experimental": { "clash_api": { "external_controller": format!("127.0.0.1:{api_port}") } }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -146,5 +171,13 @@ mod tests {
                 assert!(out.status.success(), "{l}: {}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
             }
         }
+
+        // The headless probe config must be valid too (incl. a WireGuard endpoint).
+        let nodes: Vec<Node> = links.iter().map(|l| parse_link(l).unwrap()).collect();
+        let refs: Vec<&Node> = nodes.iter().collect();
+        let path = std::env::temp_dir().join("vanish-probe-check.json");
+        std::fs::write(&path, serde_json::to_vec(&probe(&refs, 19999)).unwrap()).unwrap();
+        let out = std::process::Command::new(&bin).args(["check", "-c"]).arg(&path).output().unwrap();
+        assert!(out.status.success(), "probe: {}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
     }
 }
