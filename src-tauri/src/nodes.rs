@@ -347,12 +347,4 @@ mod tests {
         assert_eq!((ok.len(), err.len()), (2, 0), "{err:?}");
         assert_eq!(ok[0].server, "185.143.235.200");
     }
-
-    #[test]
-    fn tmp_real_sub() {
-        let Ok(body) = std::fs::read_to_string("C:/Users/sobha/AppData/Local/Temp/sub.out") else { return };
-        let (ok, err) = parse_text(&body);
-        eprintln!("REAL: ok={} err={:?}", ok.len(), err);
-        assert!(!ok.is_empty());
-    }
 }
