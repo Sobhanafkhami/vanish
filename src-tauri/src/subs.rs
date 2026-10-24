@@ -55,9 +55,13 @@ fn parse_userinfo(h: &str, sub: &mut Subscription) {
     }
 }
 
-async fn fetch(url: &str) -> Result<(String, Option<String>), String> {
+/// Panels pick the response format from the User-Agent: a "sing-box" UA often gets an empty body or a
+/// full config we cannot import, while a v2rayN-style UA gets the plain base64 link list. Try them in turn.
+const USER_AGENTS: [&str; 3] = ["v2rayN/6.45", "Vanish/0.1", "clash.meta"];
+
+async fn fetch(url: &str, user_agent: &str) -> Result<(String, Option<String>), String> {
     let resp = reqwest::Client::builder()
-        .user_agent("Vanish/0.1 sing-box")
+        .user_agent(user_agent)
         .timeout(Duration::from_secs(20))
         .build()
         .map_err(|e| e.to_string())?
@@ -76,11 +80,26 @@ async fn fetch(url: &str) -> Result<(String, Option<String>), String> {
 pub async fn refresh(app: &AppHandle, sub_id: &str) -> Result<ImportResult, String> {
     let state = app.state::<AppState>();
     let mut sub = state.subs.lock().unwrap().iter().find(|s| s.id == sub_id).cloned().ok_or("unknown subscription")?;
-    let (body, info) = fetch(&sub.url).await?;
-    let (mut parsed, errors) = nodes::parse_text(&body);
-    if parsed.is_empty() {
-        return Err(format!("no usable nodes in subscription ({} skipped)", errors.len()));
+    let mut last_err = String::from("empty response from server");
+    let mut found = None;
+    for ua in USER_AGENTS {
+        match fetch(&sub.url, ua).await {
+            Ok((body, info)) => {
+                let (parsed, errors) = nodes::parse_text(&body);
+                if !parsed.is_empty() {
+                    found = Some((parsed, errors, info));
+                    break;
+                }
+                last_err = if body.trim().is_empty() {
+                    "empty response from server".into()
+                } else {
+                    format!("no usable nodes in subscription ({} entries skipped)", errors.len())
+                };
+            }
+            Err(e) => last_err = e,
+        }
     }
+    let Some((mut parsed, errors, info)) = found else { return Err(last_err) };
     if let Some(info) = info {
         parse_userinfo(&info, &mut sub);
     }

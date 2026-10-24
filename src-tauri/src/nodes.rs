@@ -338,4 +338,21 @@ mod tests {
         let (ok, err) = parse_text(&body);
         assert_eq!((ok.len(), err.len()), (2, 0));
     }
+
+    #[test]
+    fn subscription_base64_crlf_with_encoded_names() {
+        let link = "vless://83baf1d4-f357-4baf-872f-d60f6c2c14fa@185.143.235.200:443?path=%2F&flow=&type=ws&host=a.example.com&security=tls&sni=a.example.com&allowInsecure=0&fp=chrome#%5BID%3A1%5D%20%F0%9F%93%8A%5B6GB%5D";
+        let body = STANDARD.encode(format!("{link}\r\n{link}\r\n"));
+        let (ok, err) = parse_text(&body);
+        assert_eq!((ok.len(), err.len()), (2, 0), "{err:?}");
+        assert_eq!(ok[0].server, "185.143.235.200");
+    }
+
+    #[test]
+    fn tmp_real_sub() {
+        let Ok(body) = std::fs::read_to_string("C:/Users/sobha/AppData/Local/Temp/sub.out") else { return };
+        let (ok, err) = parse_text(&body);
+        eprintln!("REAL: ok={} err={:?}", ok.len(), err);
+        assert!(!ok.is_empty());
+    }
 }
