@@ -3,19 +3,15 @@
 use tauri::{AppHandle, State};
 
 use crate::{
-    engine::{self, CoreStatus},
+    autostart,
+    engine::{self, CoreStatus, ExitInfo},
     nodes::{self, Node},
     state::{AppState, Settings},
+    subs::{self, ImportResult, Subscription},
 };
 
-#[derive(serde::Serialize)]
-pub struct ImportResult {
-    pub added: usize,
-    pub errors: Vec<String>,
-}
-
 /// Selects the first node when nothing is selected yet, so a fresh import is immediately connectable.
-fn ensure_selection(state: &AppState) -> Result<(), String> {
+pub fn ensure_selection(state: &AppState) -> Result<(), String> {
     let first = state.nodes.lock().unwrap().first().map(|n| n.id.clone());
     let changed = {
         let mut s = state.settings.lock().unwrap();
@@ -46,37 +42,70 @@ pub fn import_text(text: String, state: State<'_, AppState>) -> Result<ImportRes
 }
 
 #[tauri::command]
-pub async fn import_subscription(url: String, state: State<'_, AppState>) -> Result<ImportResult, String> {
-    let body = reqwest::Client::builder()
-        .user_agent("Vanish/0.1 sing-box")
-        .timeout(std::time::Duration::from_secs(20))
-        .build()
-        .map_err(|e| e.to_string())?
-        .get(&url)
-        .send()
-        .await
-        .and_then(|r| r.error_for_status())
-        .map_err(|e| e.to_string())?
-        .text()
-        .await
-        .map_err(|e| e.to_string())?;
+pub fn list_subscriptions(state: State<'_, AppState>) -> Vec<Subscription> {
+    state.subs.lock().unwrap().clone()
+}
 
-    let (mut parsed, errors) = nodes::parse_text(&body);
-    for n in &mut parsed {
-        n.subscription = Some(url.clone());
+/// Creates a named subscription and downloads it. On failure nothing is kept.
+#[tauri::command]
+pub async fn add_subscription(name: String, url: String, app: AppHandle, state: State<'_, AppState>) -> Result<ImportResult, String> {
+    let url = url.trim().to_string();
+    if !url.to_ascii_lowercase().starts_with("http") {
+        return Err("subscription URL must start with http:// or https://".into());
     }
-    let added = parsed.len();
-    {
-        // Re-importing the same subscription replaces its previous nodes.
-        let mut nodes = state.nodes.lock().unwrap();
-        if added > 0 {
-            nodes.retain(|n| n.subscription.as_deref() != Some(url.as_str()));
+    if state.subs.lock().unwrap().iter().any(|s| s.url == url) {
+        return Err("this subscription is already imported".into());
+    }
+    let name = if name.trim().is_empty() {
+        url::Url::parse(&url).ok().and_then(|u| u.host_str().map(str::to_string)).unwrap_or_else(|| "Subscription".into())
+    } else {
+        name.trim().to_string()
+    };
+    let sub = Subscription::new(name, url);
+    let id = sub.id.clone();
+    state.subs.lock().unwrap().push(sub);
+    match subs::refresh(&app, &id).await {
+        Ok(r) => Ok(r),
+        Err(e) => {
+            state.subs.lock().unwrap().retain(|s| s.id != id);
+            Err(e)
         }
-        nodes.extend(parsed);
     }
+}
+
+#[tauri::command]
+pub async fn refresh_subscription(id: String, app: AppHandle) -> Result<ImportResult, String> {
+    subs::refresh(&app, &id).await
+}
+
+#[tauri::command]
+pub fn rename_subscription(id: String, name: String, state: State<'_, AppState>) -> Result<(), String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("name cannot be empty".into());
+    }
+    if let Some(s) = state.subs.lock().unwrap().iter_mut().find(|s| s.id == id) {
+        s.name = name.to_string();
+    }
+    state.save_subs()
+}
+
+/// Removes the subscription together with its nodes.
+#[tauri::command]
+pub fn remove_subscription(id: String, state: State<'_, AppState>) -> Result<(), String> {
+    state.subs.lock().unwrap().retain(|s| s.id != id);
+    state.nodes.lock().unwrap().retain(|n| n.subscription.as_deref() != Some(id.as_str()));
+    state.save_subs()?;
     state.save_nodes()?;
+    {
+        let nodes = state.nodes.lock().unwrap();
+        let mut s = state.settings.lock().unwrap();
+        if s.selected_node.as_ref().is_some_and(|sel| !nodes.iter().any(|n| &n.id == sel)) {
+            s.selected_node = None;
+        }
+    }
     ensure_selection(&state)?;
-    Ok(ImportResult { added, errors })
+    state.save_settings()
 }
 
 #[tauri::command]
@@ -99,6 +128,10 @@ pub fn get_settings(state: State<'_, AppState>) -> Settings {
 
 #[tauri::command]
 pub fn set_settings(settings: Settings, state: State<'_, AppState>) -> Result<(), String> {
+    let autostart_changed = state.settings.lock().unwrap().autostart != settings.autostart;
+    if autostart_changed {
+        autostart::set(settings.autostart)?;
+    }
     *state.settings.lock().unwrap() = settings;
     state.save_settings()
 }
@@ -191,4 +224,33 @@ pub async fn http_ping(state: State<'_, AppState>) -> Result<u32, String> {
         store_latency(&state, &id, Some(ms));
     }
     Ok(ms)
+}
+
+/// TCP-pings every node, selects the fastest reachable one and returns its id.
+#[tauri::command]
+pub async fn pick_fastest(state: State<'_, AppState>) -> Result<Option<String>, String> {
+    tcp_ping_all(state.clone()).await?;
+    let best = state
+        .nodes
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|n| n.latency.map(|l| (l, n.id.clone())))
+        .min()
+        .map(|(_, id)| id);
+    if let Some(id) = &best {
+        state.settings.lock().unwrap().selected_node = Some(id.clone());
+        state.save_settings()?;
+    }
+    Ok(best)
+}
+
+/// Exit IP / country through the active tunnel.
+#[tauri::command]
+pub async fn exit_info(state: State<'_, AppState>) -> Result<ExitInfo, String> {
+    if state.active_node.lock().unwrap().is_none() {
+        return Err("not connected".into());
+    }
+    let port = state.active_ports.lock().unwrap().0;
+    engine::exit_info(port).await
 }

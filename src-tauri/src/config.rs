@@ -4,7 +4,7 @@ use serde_json::{json, Value};
 
 use crate::{
     nodes::Node,
-    state::{Mode, Settings},
+    state::{Mode, RouteMode, Settings},
 };
 
 /// WireGuard moved from an outbound to an "endpoint" in recent sing-box releases.
@@ -59,25 +59,48 @@ pub fn build(node: &Node, s: &Settings) -> Value {
         }));
     }
 
+    // Routing: private nets always direct, then user-defined bypasses, then the route mode.
+    let direct_suffixes: Vec<String> = s
+        .direct_domains
+        .iter()
+        .map(|d| d.trim().trim_start_matches("*.").to_string())
+        .filter(|d| !d.is_empty())
+        .chain(if s.route_mode == RouteMode::Rule { Some(".ir".to_string()) } else { None })
+        .collect();
+    let mut rules = vec![
+        json!({ "action": "sniff" }),
+        json!({ "protocol": "dns", "action": "hijack-dns" }),
+        json!({ "ip_is_private": true, "outbound": "direct" }),
+    ];
+    let apps: Vec<&String> = s.direct_apps.iter().filter(|a| !a.trim().is_empty()).collect();
+    if !apps.is_empty() {
+        rules.push(json!({ "process_name": apps, "outbound": "direct" }));
+    }
+    let mut dns_rules: Vec<Value> = vec![];
+    if !direct_suffixes.is_empty() {
+        rules.push(json!({ "domain_suffix": direct_suffixes, "outbound": "direct" }));
+        // Resolve bypassed domains locally so they do not leak to / depend on the remote resolver.
+        dns_rules.push(json!({ "domain_suffix": direct_suffixes, "action": "route", "server": "local" }));
+    }
+    let direct_all = s.route_mode == RouteMode::Direct;
+    let dns_server = if s.dns_server.trim().is_empty() { "1.1.1.1" } else { s.dns_server.trim() };
+
     json!({
         "log": { "level": "info", "timestamp": true },
         "dns": {
             "servers": [
-                { "type": "https", "tag": "remote", "server": "1.1.1.1", "detour": "proxy" },
+                { "type": "https", "tag": "remote", "server": dns_server, "detour": if direct_all { "direct" } else { "proxy" } },
                 { "type": "local", "tag": "local" }
             ],
+            "rules": dns_rules,
             "final": "remote",
         },
         "inbounds": inbounds,
         "outbounds": outbounds,
         "endpoints": endpoints,
         "route": {
-            "rules": [
-                { "action": "sniff" },
-                { "protocol": "dns", "action": "hijack-dns" },
-                { "ip_is_private": true, "outbound": "direct" }
-            ],
-            "final": "proxy",
+            "rules": rules,
+            "final": if direct_all { "direct" } else { "proxy" },
             "auto_detect_interface": true,
             // Resolves the proxy server's own hostname without going through the tunnel.
             "default_domain_resolver": "local",
@@ -107,10 +130,16 @@ mod tests {
             "trojan://pw@example.com:443#t",
             "wireguard://cHJpdmF0ZWtleXByaXZhdGVrZXlwcml2YXRla2V5MTI=@example.com:51820?publickey=cHVibGljcHVibGljcHVibGljcHVibGljcHVibGljMTI=&address=10.0.0.2/32#w",
         ];
-        for mode in [Mode::SystemProxy, Mode::Tun] {
+        for (mode, route_mode) in [(Mode::SystemProxy, RouteMode::Rule), (Mode::Tun, RouteMode::Rule), (Mode::SystemProxy, RouteMode::Global), (Mode::SystemProxy, RouteMode::Direct)] {
             for l in links {
                 let node = parse_link(l).unwrap();
-                let settings = Settings { mode, ..Settings::default() };
+                let settings = Settings {
+                    mode,
+                    route_mode,
+                    direct_domains: vec!["example.org".into()],
+                    direct_apps: vec!["steam.exe".into()],
+                    ..Settings::default()
+                };
                 let path = std::env::temp_dir().join("vanish-check.json");
                 std::fs::write(&path, serde_json::to_vec(&build(&node, &settings)).unwrap()).unwrap();
                 let out = std::process::Command::new(&bin).args(["check", "-c"]).arg(&path).output().unwrap();

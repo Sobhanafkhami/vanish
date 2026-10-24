@@ -7,7 +7,26 @@ export interface VanishNode {
   server: string;
   port: number;
   latency: number | null;
+  /** Owning subscription id; null for manually added nodes. */
   subscription: string | null;
+  link: string | null;
+}
+
+export interface Subscription {
+  id: string;
+  name: string;
+  url: string;
+  updated_at: number | null;
+  upload: number | null;
+  download: number | null;
+  total: number | null;
+  expire: number | null;
+}
+
+export interface ExitInfo {
+  ip: string;
+  country: string;
+  country_code: string;
 }
 
 export interface Settings {
@@ -18,11 +37,21 @@ export interface Settings {
   core_path: string | null;
   selected_node: string | null;
   ping_url: string;
+  route_mode: "global" | "rule" | "direct";
+  direct_domains: string[];
+  direct_apps: string[];
+  dns_server: string;
+  autostart: boolean;
+  connect_on_launch: boolean;
+  auto_fallback: boolean;
+  kill_switch: boolean;
+  sub_refresh_hours: number;
 }
 
 export interface CoreStatus {
   running: boolean;
   node_id: string | null;
+  blocked: boolean;
 }
 
 export interface ImportResult {
@@ -33,7 +62,13 @@ export interface ImportResult {
 export const api = {
   listNodes: () => invoke<VanishNode[]>("list_nodes"),
   importText: (text: string) => invoke<ImportResult>("import_text", { text }),
-  importSubscription: (url: string) => invoke<ImportResult>("import_subscription", { url }),
+  listSubscriptions: () => invoke<Subscription[]>("list_subscriptions"),
+  addSubscription: (name: string, url: string) => invoke<ImportResult>("add_subscription", { name, url }),
+  refreshSubscription: (id: string) => invoke<ImportResult>("refresh_subscription", { id }),
+  renameSubscription: (id: string, name: string) => invoke<void>("rename_subscription", { id, name }),
+  removeSubscription: (id: string) => invoke<void>("remove_subscription", { id }),
+  pickFastest: () => invoke<string | null>("pick_fastest"),
+  exitInfo: () => invoke<ExitInfo>("exit_info"),
   removeNode: (id: string) => invoke<void>("remove_node", { id }),
   selectNode: (id: string) => invoke<void>("select_node", { id }),
   getSettings: () => invoke<Settings>("get_settings"),

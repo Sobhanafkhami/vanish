@@ -21,7 +21,11 @@ pub struct Node {
     pub port: u16,
     pub outbound: Value,
     pub latency: Option<u32>,
+    /// Id of the owning subscription; `None` for manually added nodes.
     pub subscription: Option<String>,
+    /// Original share link (when imported from one), used for QR export.
+    #[serde(default)]
+    pub link: Option<String>,
 }
 
 type Query = HashMap<String, String>;
@@ -50,6 +54,7 @@ fn node_from_outbound(name: String, outbound: Value) -> Result<Node, String> {
         outbound,
         latency: None,
         subscription: None,
+        link: None,
     })
 }
 
@@ -265,14 +270,16 @@ fn parse_json_outbounds(text: &str) -> Vec<Result<Node, String>> {
 
 pub fn parse_link(line: &str) -> Result<Node, String> {
     let line = line.trim();
-    match line.split_once("://").map(|(s, _)| s.to_ascii_lowercase()).as_deref() {
+    let mut node = match line.split_once("://").map(|(s, _)| s.to_ascii_lowercase()).as_deref() {
         Some("vless") => parse_vless(line),
         Some("vmess") => parse_vmess(line),
         Some("trojan") => parse_trojan(line),
         Some("ss") => parse_ss(line),
         Some("wireguard" | "wg") => parse_wireguard(line),
         _ => Err(format!("unsupported link: {}", line.chars().take(24).collect::<String>())),
-    }
+    }?;
+    node.link = Some(line.to_string());
+    Ok(node)
 }
 
 /// Parses pasted text: single links, many lines, a base64 subscription body,

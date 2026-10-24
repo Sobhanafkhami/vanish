@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted } from "vue";
-import { Gauge, RefreshCw } from "lucide-vue-next";
+import { Gauge, Globe, RefreshCw, ShieldAlert } from "lucide-vue-next";
 import TitleBar from "./components/TitleBar.vue";
 import ConnectButton from "./components/ConnectButton.vue";
 import TrafficMonitor from "./components/TrafficMonitor.vue";
 import NodeList from "./components/NodeList.vue";
+import SettingsModal from "./components/SettingsModal.vue";
+import LogsModal from "./components/LogsModal.vue";
+import QrModal from "./components/QrModal.vue";
 import { init, measureLatency, setMode, store } from "./stores/app";
 
 onMounted(init);
@@ -20,7 +23,7 @@ const latencyText = computed(() => (store.latency === null ? "---" : String(stor
 
 <template>
   <div
-    class="flex h-full flex-col overflow-hidden rounded-xl border border-ink-line bg-ink/95"
+    class="relative flex h-full flex-col overflow-hidden rounded-xl border border-ink-line bg-ink/95"
   >
     <TitleBar />
     <main class="grid min-h-0 flex-1 grid-cols-[320px_1fr] gap-4 p-4">
@@ -55,15 +58,35 @@ const latencyText = computed(() => (store.latency === null ? "---" : String(stor
           </div>
         </div>
 
+        <div v-if="store.exit" class="panel flex items-center justify-between px-4 py-3">
+          <div class="flex items-center gap-2">
+            <Globe :size="16" class="text-accent-soft" />
+            <span class="hud-label">Exit</span>
+          </div>
+          <span class="font-mono text-sm text-white">{{ store.exit.ip }} <span class="ml-1 text-xs text-white/50">{{ store.exit.country_code }}</span></span>
+        </div>
+
         <TrafficMonitor />
       </section>
 
       <section class="flex min-h-0 flex-col gap-3">
         <NodeList />
         <Transition name="fade">
+          <div v-if="store.status.blocked" class="panel flex items-start gap-2 border-red-500/40 p-3 text-xs text-red-300" role="alert">
+            <ShieldAlert :size="16" class="mt-0.5 shrink-0" />
+            <span>The core stopped unexpectedly. The kill switch is blocking traffic. Press the power button to reconnect.</span>
+          </div>
+        </Transition>
+        <Transition name="fade">
+          <div v-if="store.notice" class="panel border-accent/30 p-3 text-xs text-accent-soft" role="status">{{ store.notice }}</div>
+        </Transition>
+        <Transition name="fade">
           <div v-if="store.error" class="panel whitespace-pre-wrap border-red-500/40 p-3 font-mono text-xs text-red-300">{{ store.error }}</div>
         </Transition>
       </section>
     </main>
+    <SettingsModal v-if="store.ui.settings" />
+    <LogsModal v-if="store.ui.logs" />
+    <QrModal v-if="store.ui.qr" />
   </div>
 </template>

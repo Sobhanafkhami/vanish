@@ -1,6 +1,6 @@
 //! sing-box child-process supervisor, traffic polling and latency probes.
 
-use std::{path::PathBuf, process::Stdio, time::Duration};
+use std::{path::PathBuf, process::Stdio, sync::atomic::Ordering, time::Duration};
 
 use serde::Serialize;
 use serde_json::Value;
@@ -21,6 +21,8 @@ use crate::{
 pub struct CoreStatus {
     pub running: bool,
     pub node_id: Option<String>,
+    /// Kill switch is holding traffic after the core died unexpectedly.
+    pub blocked: bool,
 }
 
 #[derive(Serialize, Clone)]
@@ -63,7 +65,7 @@ fn free_port(preferred: u16, avoid: Option<u16>) -> u16 {
 pub fn status(app: &AppHandle) -> CoreStatus {
     let state = app.state::<AppState>();
     let node_id = state.active_node.lock().unwrap().clone();
-    CoreStatus { running: node_id.is_some(), node_id }
+    CoreStatus { running: node_id.is_some(), node_id, blocked: state.blocked.load(Ordering::SeqCst) }
 }
 
 fn emit_state(app: &AppHandle) {
@@ -82,6 +84,7 @@ pub async fn start(app: &AppHandle) -> Result<CoreStatus, String> {
     settings.mixed_port = free_port(settings.mixed_port, None);
     settings.api_port = free_port(settings.api_port, Some(settings.mixed_port));
     *state.active_ports.lock().unwrap() = (settings.mixed_port, settings.api_port);
+    state.blocked.store(false, Ordering::SeqCst);
 
     if settings.engine == Engine::Xray {
         return Err("xray-core fallback is not implemented yet; switch engine to sing-box".into());
@@ -167,6 +170,8 @@ pub async fn start(app: &AppHandle) -> Result<CoreStatus, String> {
     *state.active_node.lock().unwrap() = Some(node.id.clone());
     drop(child_slot);
 
+    let generation = state.generation.fetch_add(1, Ordering::SeqCst) + 1;
+    tauri::async_runtime::spawn(watchdog(app.clone(), generation, node.id.clone()));
     let task = tauri::async_runtime::spawn(traffic_loop(app.clone(), settings.api_port));
     if let Some(old) = state.traffic_task.lock().unwrap().replace(task) {
         old.abort();
@@ -177,6 +182,8 @@ pub async fn start(app: &AppHandle) -> Result<CoreStatus, String> {
 
 pub async fn stop(app: &AppHandle) -> Result<CoreStatus, String> {
     let state = app.state::<AppState>();
+    state.generation.fetch_add(1, Ordering::SeqCst); // retires the watchdog
+    state.blocked.store(false, Ordering::SeqCst);
     if let Some(t) = state.traffic_task.lock().unwrap().take() {
         t.abort();
     }
@@ -231,4 +238,116 @@ pub async fn http_ping(port: u16, url: &str) -> Result<u32, String> {
     let t = Instant::now();
     client.get(url).send().await.map_err(|e| e.to_string())?;
     Ok(t.elapsed().as_millis() as u32)
+}
+
+/// Supervises a running core: detects an unexpected exit (kill switch) and a dead node (auto fallback).
+async fn watchdog(app: AppHandle, generation: u64, node_id: String) {
+    let state = app.state::<AppState>();
+    let alive = || state.generation.load(Ordering::SeqCst) == generation;
+    let mut failures = 0u32;
+    loop {
+        sleep(Duration::from_secs(8)).await;
+        if !alive() {
+            return;
+        }
+        let (mode, kill_switch, fallback, ping_url) = {
+            let s = state.settings.lock().unwrap();
+            (s.mode, s.kill_switch, s.auto_fallback, s.ping_url.clone())
+        };
+
+        let exited = {
+            let mut slot = state.child.lock().await;
+            slot.as_mut().is_some_and(|c| matches!(c.try_wait(), Ok(Some(_)))) && slot.take().is_some()
+        };
+        if exited {
+            if let Some(t) = state.traffic_task.lock().unwrap().take() {
+                t.abort();
+            }
+            *state.active_node.lock().unwrap() = None;
+            if kill_switch && mode == Mode::SystemProxy {
+                // Leave the system proxy pointing at the dead port: apps fail closed instead of leaking.
+                state.blocked.store(true, Ordering::SeqCst);
+            } else {
+                let _ = proxy::clear();
+            }
+            state.generation.fetch_add(1, Ordering::SeqCst);
+            emit_state(&app);
+            let _ = app.emit("core-log", "core exited unexpectedly");
+            return;
+        }
+
+        let port = state.active_ports.lock().unwrap().0;
+        match http_ping(port, &ping_url).await {
+            Ok(_) => failures = 0,
+            Err(_) => failures += 1,
+        }
+        if failures >= 3 && fallback {
+            if let Some(next) = pick_alternative(&app, &node_id).await {
+                state.settings.lock().unwrap().selected_node = Some(next.clone());
+                let _ = state.save_settings();
+                let name = state.nodes.lock().unwrap().iter().find(|n| n.id == next).map(|n| n.name.clone()).unwrap_or_default();
+                let _ = app.emit("core-log", format!("node unreachable, switching to {name}"));
+                let _ = app.emit("fallback", name);
+                // Restarted from lib.rs (a listener) to avoid a start -> watchdog -> start async cycle.
+                let _ = app.emit("restart-core", ());
+                return;
+            }
+            failures = 0;
+        }
+    }
+}
+
+/// Lowest-latency node other than `current` that answers a TCP connect.
+async fn pick_alternative(app: &AppHandle, current: &str) -> Option<String> {
+    let state = app.state::<AppState>();
+    let targets: Vec<(String, String, u16)> = state
+        .nodes
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|n| n.id != current)
+        .map(|n| (n.id.clone(), n.server.clone(), n.port))
+        .collect();
+    let handles: Vec<_> = targets
+        .into_iter()
+        .map(|(id, server, port)| tauri::async_runtime::spawn(async move { (id, tcp_ping(&server, port).await) }))
+        .collect();
+    let mut best: Option<(String, u32)> = None;
+    for h in handles {
+        if let Ok((id, Some(ms))) = h.await {
+            if best.as_ref().is_none_or(|(_, b)| ms < *b) {
+                best = Some((id, ms));
+            }
+        }
+    }
+    best.map(|(id, _)| id)
+}
+
+#[derive(Serialize, Clone)]
+pub struct ExitInfo {
+    pub ip: String,
+    pub country: String,
+    pub country_code: String,
+}
+
+/// Public IP and country as seen from outside, through the running core.
+pub async fn exit_info(port: u16) -> Result<ExitInfo, String> {
+    let client = reqwest::Client::builder()
+        .proxy(reqwest::Proxy::all(format!("http://127.0.0.1:{port}")).map_err(|e| e.to_string())?)
+        .timeout(Duration::from_secs(8))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let v: Value = client
+        .get("http://ip-api.com/json/?fields=status,query,country,countryCode")
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .json()
+        .await
+        .map_err(|e| e.to_string())?;
+    if v["status"] != "success" {
+        return Err("exit IP lookup failed".into());
+    }
+    let s = |k: &str| v[k].as_str().unwrap_or_default().to_string();
+    Ok(ExitInfo { ip: s("query"), country: s("country"), country_code: s("countryCode") })
 }

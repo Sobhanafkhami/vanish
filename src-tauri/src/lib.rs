@@ -1,9 +1,11 @@
+mod autostart;
 mod commands;
 mod config;
 mod engine;
 mod nodes;
 mod proxy;
 mod state;
+mod subs;
 mod tray;
 
 use tauri::{Manager, WindowEvent};
@@ -19,6 +21,40 @@ pub fn run() {
             std::fs::create_dir_all(dir.join("bin"))?;
             app.manage(state::AppState::load(dir));
             tray::init(app.handle())?;
+
+            // Launched by the OS at login: stay in the tray.
+            if std::env::args().any(|a| a == "--minimized") {
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.hide();
+                }
+            }
+            let handle = app.handle().clone();
+            {
+                use tauri::Listener;
+                let h = handle.clone();
+                app.listen("restart-core", move |_| {
+                    let h = h.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let _ = engine::stop(&h).await;
+                        if let Err(e) = engine::start(&h).await {
+                            eprintln!("restart failed: {e}");
+                        }
+                    });
+                });
+            }
+            tauri::async_runtime::spawn(subs::refresh_loop(handle.clone()));
+            let connect = {
+                let st = handle.state::<state::AppState>();
+                let s = st.settings.lock().unwrap();
+                s.connect_on_launch && s.selected_node.is_some()
+            };
+            if connect {
+                tauri::async_runtime::spawn(async move {
+                    if let Err(e) = engine::start(&handle).await {
+                        eprintln!("connect on launch failed: {e}");
+                    }
+                });
+            }
             Ok(())
         })
         // Closing the window minimizes to tray; use the tray menu to quit.
@@ -31,7 +67,13 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::list_nodes,
             commands::import_text,
-            commands::import_subscription,
+            commands::list_subscriptions,
+            commands::add_subscription,
+            commands::refresh_subscription,
+            commands::rename_subscription,
+            commands::remove_subscription,
+            commands::pick_fastest,
+            commands::exit_info,
             commands::remove_node,
             commands::get_settings,
             commands::set_settings,

@@ -14,10 +14,12 @@
   "dependencies": {
     "@tauri-apps/api": "^2.1.1",
     "lucide-vue-next": "^0.460.0",
+    "qrcode": "^1.5.4",
     "vue": "^3.5.13"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.1.0",
+    "@types/qrcode": "^1.5.6",
     "@vitejs/plugin-vue": "^5.2.1",
     "autoprefixer": "^10.4.20",
     "postcss": "^8.4.49",

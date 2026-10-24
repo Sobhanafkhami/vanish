@@ -1,62 +1,284 @@
 <script setup lang="ts">
-import { ref } from "vue";
-import { Activity, ClipboardPaste, Trash2 } from "lucide-vue-next";
-import { importInput, pingAll, removeNode, selectNode, store } from "../stores/app";
+import { computed, nextTick, ref } from "vue";
+import { Activity, ArrowDownUp, Check, ClipboardPaste, Pencil, QrCode, RefreshCw, Search, Trash2, X, Zap } from "lucide-vue-next";
+import {
+  addSubscription,
+  connectFastest,
+  importLinks,
+  pingAll,
+  refreshSubscription,
+  removeNode,
+  removeSubscription,
+  renameSubscription,
+  selectNode,
+  store,
+} from "../stores/app";
 
 const input = ref("");
+const subName = ref("");
+const subUrl = ref("");
+const importKind = ref<"sub" | "links">("sub");
 const showImport = ref(false);
 const message = ref("");
+const query = ref("");
+const sortByPing = ref(false);
+const renaming = ref(false);
+const renameValue = ref("");
+const renameInput = ref<HTMLInputElement | null>(null);
+
+function flash(text: string) {
+  message.value = text;
+  setTimeout(() => (message.value = ""), 4000);
+}
 
 async function doImport() {
-  if (!input.value.trim()) return;
-  message.value = await importInput(input.value);
-  input.value = "";
-  showImport.value = false;
-  setTimeout(() => (message.value = ""), 4000);
+  if (importKind.value === "sub") {
+    if (!subUrl.value.trim()) return;
+    const res = await addSubscription(subName.value, subUrl.value);
+    flash(res);
+    if (!store.error) {
+      subName.value = subUrl.value = "";
+      showImport.value = false;
+    }
+  } else {
+    if (!input.value.trim()) return;
+    flash(await importLinks(input.value));
+    input.value = "";
+    showImport.value = false;
+  }
+}
+
+async function paste() {
+  try {
+    const text = (await navigator.clipboard.readText()).trim();
+    if (!text) return;
+    if (/^https?:\/\//i.test(text) && !text.includes("\n")) {
+      importKind.value = "sub";
+      subUrl.value = text;
+    } else {
+      importKind.value = "links";
+      input.value = text;
+    }
+  } catch {
+    flash("Clipboard access was denied");
+  }
+}
+
+const manualCount = computed(() => store.nodes.filter((n) => !n.subscription).length);
+const activeSub = computed(() => store.subs.find((s) => s.id === store.activeTab) ?? null);
+
+const visible = computed(() => {
+  const tab = store.activeTab;
+  const q = query.value.trim().toLowerCase();
+  let list = store.nodes.filter((n) => (tab === "all" ? true : tab === "manual" ? !n.subscription : n.subscription === tab));
+  if (q) list = list.filter((n) => `${n.name} ${n.server} ${n.protocol}`.toLowerCase().includes(q));
+  if (sortByPing.value) {
+    list = [...list].sort((a, b) => (a.latency ?? Infinity) - (b.latency ?? Infinity));
+  }
+  return list;
+});
+
+function countFor(subId: string) {
+  return store.nodes.filter((n) => n.subscription === subId).length;
 }
 
 function latencyClass(ms: number | null) {
   if (ms === null) return "text-white/40";
   return ms < 150 ? "text-accent-soft" : ms < 400 ? "text-yellow-300" : "text-red-400";
 }
+
+function fmtBytes(b: number) {
+  const u = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  while (b >= 1024 && i < u.length - 1) {
+    b /= 1024;
+    i++;
+  }
+  return `${b.toFixed(i > 1 ? 1 : 0)} ${u[i]}`;
+}
+const used = computed(() => (activeSub.value ? (activeSub.value.upload ?? 0) + (activeSub.value.download ?? 0) : 0));
+const usedPct = computed(() => (activeSub.value?.total ? Math.min(100, (used.value / activeSub.value.total) * 100) : 0));
+const expiry = computed(() => {
+  const e = activeSub.value?.expire;
+  if (!e) return null;
+  const days = Math.ceil((e * 1000 - Date.now()) / 86_400_000);
+  return days < 0 ? "expired" : `${days} day${days === 1 ? "" : "s"} left`;
+});
+const updatedText = computed(() => {
+  const t = activeSub.value?.updated_at;
+  return t ? new Date(t * 1000).toLocaleString() : "never";
+});
+
+async function startRename() {
+  if (!activeSub.value) return;
+  renameValue.value = activeSub.value.name;
+  renaming.value = true;
+  await nextTick();
+  renameInput.value?.focus();
+}
+async function commitRename() {
+  if (activeSub.value && renameValue.value.trim()) await renameSubscription(activeSub.value.id, renameValue.value);
+  renaming.value = false;
+}
+async function deleteSub() {
+  if (!activeSub.value) return;
+  if (confirm(`Remove "${activeSub.value.name}" and its ${countFor(activeSub.value.id)} node(s)?`)) await removeSubscription(activeSub.value.id);
+}
 </script>
 
 <template>
   <div class="panel flex min-h-0 flex-1 flex-col p-4">
     <div class="mb-3 flex items-center justify-between">
-      <span class="hud-label">Nodes · {{ store.nodes.length }}</span>
+      <span class="hud-label">Nodes · {{ visible.length }}</span>
       <div class="flex gap-2">
+        <button class="btn" :disabled="store.busy || !store.nodes.length" title="Ping all, then select the quickest" @click="connectFastest">
+          <Zap :size="13" /> Fastest
+        </button>
         <button class="btn" :disabled="store.busy || !store.nodes.length" @click="pingAll"><Activity :size="13" /> TCP ping</button>
         <button class="btn" @click="showImport = !showImport"><ClipboardPaste :size="13" /> Import</button>
       </div>
     </div>
 
     <Transition name="fade">
-      <div v-if="showImport" class="mb-3">
+      <div v-if="showImport" class="mb-3 rounded-xl border border-ink-line bg-black/30 p-3">
+        <div class="mb-3 flex items-center justify-between">
+          <div class="flex gap-1 rounded-lg border border-ink-line bg-black/40 p-1">
+            <button
+              v-for="k in [{ id: 'sub', label: 'Subscription' }, { id: 'links', label: 'Links / JSON' }] as const"
+              :key="k.id"
+              class="rounded-md px-3 py-1 text-xs transition"
+              :class="importKind === k.id ? 'bg-accent/15 text-accent-soft' : 'text-white/50 hover:text-white/80'"
+              @click="importKind = k.id"
+            >
+              {{ k.label }}
+            </button>
+          </div>
+          <button class="btn" @click="paste"><ClipboardPaste :size="13" /> Paste</button>
+        </div>
+
+        <div v-if="importKind === 'sub'" class="space-y-2">
+          <input
+            v-model="subName"
+            maxlength="40"
+            placeholder="Name (e.g. Work, Home)"
+            class="w-full rounded-lg border border-ink-line bg-black/40 p-2 text-xs text-white outline-none placeholder:text-white/30 focus:border-accent/60"
+          />
+          <input
+            v-model="subUrl"
+            placeholder="https://example.com/sub/..."
+            class="w-full rounded-lg border border-ink-line bg-black/40 p-2 font-mono text-xs text-white outline-none placeholder:text-white/30 focus:border-accent/60"
+            @keydown.enter="doImport"
+          />
+        </div>
         <textarea
+          v-else
           v-model="input"
           rows="3"
-          placeholder="Subscription URL, vless:// vmess:// trojan:// ss:// wireguard:// links, or sing-box outbound JSON"
+          placeholder="vless:// vmess:// trojan:// ss:// wireguard:// links, or sing-box outbound JSON"
           class="w-full resize-none rounded-lg border border-ink-line bg-black/40 p-2 font-mono text-xs text-white outline-none placeholder:text-white/30 focus:border-accent/60"
         />
-        <button class="btn mt-2" :disabled="store.busy" @click="doImport">Add</button>
+        <button class="btn mt-2" :disabled="store.busy" @click="doImport">{{ importKind === "sub" ? "Add subscription" : "Add" }}</button>
       </div>
     </Transition>
     <div v-if="message" class="mb-2 font-mono text-xs text-accent-soft">{{ message }}</div>
 
+    <!-- tabs: one per subscription -->
+    <div v-if="store.subs.length || manualCount" class="mb-3 flex gap-1 overflow-x-auto border-b border-ink-line pb-2" role="tablist">
+      <button
+        role="tab"
+        :aria-selected="store.activeTab === 'all'"
+        class="shrink-0 rounded-md px-3 py-1 text-xs transition"
+        :class="store.activeTab === 'all' ? 'bg-accent/15 text-accent-soft' : 'text-white/50 hover:text-white/80'"
+        @click="store.activeTab = 'all'"
+      >
+        All <span class="ml-1 font-mono text-[10px] opacity-70">{{ store.nodes.length }}</span>
+      </button>
+      <button
+        v-if="manualCount"
+        role="tab"
+        :aria-selected="store.activeTab === 'manual'"
+        class="shrink-0 rounded-md px-3 py-1 text-xs transition"
+        :class="store.activeTab === 'manual' ? 'bg-accent/15 text-accent-soft' : 'text-white/50 hover:text-white/80'"
+        @click="store.activeTab = 'manual'"
+      >
+        Manual <span class="ml-1 font-mono text-[10px] opacity-70">{{ manualCount }}</span>
+      </button>
+      <button
+        v-for="s in store.subs"
+        :key="s.id"
+        role="tab"
+        :aria-selected="store.activeTab === s.id"
+        class="max-w-[10rem] shrink-0 truncate rounded-md px-3 py-1 text-xs transition"
+        :class="store.activeTab === s.id ? 'bg-accent/15 text-accent-soft' : 'text-white/50 hover:text-white/80'"
+        @click="store.activeTab = s.id"
+      >
+        {{ s.name }} <span class="ml-1 font-mono text-[10px] opacity-70">{{ countFor(s.id) }}</span>
+      </button>
+    </div>
+
+    <!-- subscription details -->
+    <div v-if="activeSub" class="mb-3 rounded-xl border border-ink-line bg-black/30 p-3">
+      <div class="flex items-center justify-between gap-2">
+        <div v-if="!renaming" class="min-w-0 truncate text-sm font-medium text-white">{{ activeSub.name }}</div>
+        <input
+          v-else
+          ref="renameInput"
+          v-model="renameValue"
+          maxlength="40"
+          class="min-w-0 flex-1 rounded border border-accent/60 bg-black/40 px-2 py-0.5 text-sm text-white outline-none"
+          @keydown.enter="commitRename"
+          @keydown.esc="renaming = false"
+        />
+        <div class="flex shrink-0 gap-1 text-white/50">
+          <template v-if="renaming">
+            <button class="p-1 hover:text-accent-soft" aria-label="Save name" @click="commitRename"><Check :size="14" /></button>
+            <button class="p-1 hover:text-white" aria-label="Cancel" @click="renaming = false"><X :size="14" /></button>
+          </template>
+          <template v-else>
+            <button class="p-1 hover:text-white" aria-label="Rename subscription" @click="startRename"><Pencil :size="14" /></button>
+            <button class="p-1 hover:text-white" aria-label="Show subscription QR" @click="store.ui.qr = { title: activeSub.name, text: activeSub.url }">
+              <QrCode :size="14" />
+            </button>
+            <button class="p-1 hover:text-accent-soft disabled:opacity-40" :disabled="store.busy" aria-label="Refresh subscription" @click="refreshSubscription(activeSub.id)">
+              <RefreshCw :size="14" />
+            </button>
+            <button class="p-1 hover:text-red-400" aria-label="Remove subscription" @click="deleteSub"><Trash2 :size="14" /></button>
+          </template>
+        </div>
+      </div>
+      <div class="mt-1 truncate font-mono text-[10px] text-white/45">{{ activeSub.url }}</div>
+      <div v-if="activeSub.total" class="mt-2">
+        <div class="h-1.5 overflow-hidden rounded-full bg-white/10">
+          <div class="h-full rounded-full bg-accent" :style="{ width: usedPct + '%' }"></div>
+        </div>
+        <div class="mt-1 flex justify-between font-mono text-[10px] text-white/55">
+          <span>{{ fmtBytes(used) }} / {{ fmtBytes(activeSub.total) }}</span>
+          <span v-if="expiry">{{ expiry }}</span>
+        </div>
+      </div>
+      <div class="mt-1 font-mono text-[10px] text-white/45">Updated {{ updatedText }}</div>
+    </div>
+
+    <div class="mb-3 flex gap-2">
+      <label class="flex flex-1 items-center gap-2 rounded-lg border border-ink-line bg-black/30 px-2 text-white/50 focus-within:border-accent/60">
+        <Search :size="13" />
+        <input v-model="query" placeholder="Search nodes" class="w-full bg-transparent py-1.5 text-xs text-white outline-none placeholder:text-white/30" />
+      </label>
+      <button class="btn" :class="{ '!border-accent/50 !text-accent-soft': sortByPing }" :aria-pressed="sortByPing" @click="sortByPing = !sortByPing">
+        <ArrowDownUp :size="13" /> Ping
+      </button>
+    </div>
+
     <div class="-mr-2 flex-1 space-y-2 overflow-y-auto pr-2">
-      <div v-if="!store.nodes.length" class="grid h-full place-items-center text-center text-xs text-white/30">
+      <div v-if="!store.nodes.length" class="grid h-full place-items-center text-center text-xs text-white/40">
         No nodes yet.<br />Import a subscription or paste a config link.
       </div>
+      <div v-else-if="!visible.length" class="grid h-full place-items-center text-center text-xs text-white/40">No nodes match.</div>
       <div
-        v-for="n in store.nodes"
+        v-for="n in visible"
         :key="n.id"
         class="group flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-2 transition"
-        :class="
-          store.settings?.selected_node === n.id
-            ? 'border-accent/50 bg-accent/5'
-            : 'border-ink-line bg-white/[0.02] hover:border-white/20'
-        "
+        :class="store.settings?.selected_node === n.id ? 'border-accent/50 bg-accent/5' : 'border-ink-line bg-white/[0.02] hover:border-white/20'"
         @click="selectNode(n.id)"
       >
         <span class="rounded border border-ink-line px-1.5 py-0.5 font-mono text-[9px] uppercase text-accent-soft">{{ n.protocol }}</span>
@@ -65,7 +287,15 @@ function latencyClass(ms: number | null) {
           <div class="truncate font-mono text-[10px] text-white/45">{{ n.server }}:{{ n.port }}</div>
         </div>
         <span class="w-14 text-right font-mono text-xs" :class="latencyClass(n.latency)">{{ n.latency === null ? "—" : n.latency + " ms" }}</span>
-        <button class="text-white/30 opacity-0 transition hover:text-red-400 group-hover:opacity-100" @click.stop="removeNode(n.id)">
+        <button
+          v-if="n.link"
+          class="text-white/30 opacity-0 transition hover:text-white focus-visible:opacity-100 group-hover:opacity-100"
+          aria-label="Show QR code"
+          @click.stop="store.ui.qr = { title: n.name, text: n.link }"
+        >
+          <QrCode :size="14" />
+        </button>
+        <button class="text-white/30 opacity-0 transition hover:text-red-400 focus-visible:opacity-100 group-hover:opacity-100" aria-label="Remove node" @click.stop="removeNode(n.id)">
           <Trash2 :size="14" />
         </button>
       </div>
