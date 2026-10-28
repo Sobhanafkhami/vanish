@@ -25,8 +25,11 @@ const label = computed(() => (store.busy ? "Working" : on.value ? "Connected" : 
       </button>
     </div>
     <div class="text-center">
-      <div class="text-sm font-semibold tracking-wide" :class="on ? 'text-accent-soft' : 'text-white/50'">{{ t(label) }}</div>
-      <div class="mt-1 max-w-[16rem] truncate text-xs text-white/50">
+      <div class="flex items-center justify-center gap-2 text-base font-semibold" :class="on ? 'text-accent-soft' : 'text-white/60'">
+        <span class="h-2 w-2 rounded-full" :class="store.busy ? 'animate-pulse bg-yellow-300' : on ? 'bg-accent' : 'bg-white/25'" aria-hidden="true"></span>
+        {{ t(label) }}
+      </div>
+      <div class="mt-1.5 max-w-[16rem] truncate text-sm" :class="selectedNode ? 'text-white/70' : 'text-white/40'">
         {{ selectedNode ? selectedNode.name : t("Select or import a node") }}
       </div>
     </div>

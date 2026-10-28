@@ -234,6 +234,82 @@ const fa: Record<string, string> = {
   "Updated: {n} node(s)": "به‌روز شد: {n} کانفیگ",
   "You are on the latest version": "نسخه‌ی شما به‌روز است",
   "Could not check for updates: {e}": "بررسی به‌روزرسانی ممکن نشد: {e}",
+
+  // layout
+  Servers: "سرورها",
+  Mode: "حالت",
+  Test: "تست",
+  "Add servers": "افزودن سرور",
+  Connection: "اتصال",
+  "Connect to see your new location.": "برای دیدن موقعیت جدیدتان وصل شوید.",
+  "Show details": "نمایش جزئیات",
+  "Hide details": "پنهان کردن جزئیات",
+  Dismiss: "بستن",
+  "Technical details": "جزئیات فنی",
+  "Measure latency": "اندازه‌گیری تأخیر",
+  "Exit IP": "IP خروجی",
+  "Browsers and apps that follow the Windows proxy settings.": "مرورگرها و برنامه‌هایی که از تنظیمات پراکسی ویندوز پیروی می‌کنند.",
+  "Captures all traffic on this PC. Needs administrator rights.": "تمام ترافیک این رایانه را می‌گیرد. دسترسی ادمین لازم است.",
+  "Only apps you point at the local port.": "فقط برنامه‌هایی که خودتان به پورت محلی وصل کنید.",
+  "Disconnect to change the mode.": "برای تغییر حالت، اتصال را قطع کنید.",
+  "Real HTTP delay through this server": "تأخیر واقعی HTTP از طریق این سرور",
+  "TCP connect time": "زمان اتصال TCP",
+  "Add a subscription link or paste a config.": "لینک اشتراک اضافه کنید یا کانفیگ را بچسبانید.",
+  "Select a server first": "ابتدا یک سرور انتخاب کنید",
+
+  // friendly errors
+  "Something went wrong": "مشکلی پیش آمد",
+  "Try again. If it keeps happening, open the Core log from the top bar.": "دوباره تلاش کنید. اگر تکرار شد، لاگ هسته را از نوار بالا باز کنید.",
+  "This link isn't valid": "این لینک معتبر نیست",
+  "A subscription link must start with http:// or https://.": "لینک اشتراک باید با http:// یا https:// شروع شود.",
+  "Already added": "قبلاً اضافه شده",
+  "This subscription is already in your list.": "این اشتراک از قبل در فهرست شما هست.",
+  "The name is empty": "نام خالی است",
+  "Type a name and try again.": "یک نام وارد کنید و دوباره تلاش کنید.",
+  "You are not connected": "متصل نیستید",
+  "Connect first, then run this again.": "اول وصل شوید، بعد دوباره امتحان کنید.",
+  "A test is already running": "یک تست در حال اجراست",
+  "Wait for it to finish.": "صبر کنید تا تمام شود.",
+  "This engine isn't available yet": "این موتور هنوز در دسترس نیست",
+  "Switch the engine to sing-box and try again.": "موتور را روی sing-box بگذارید و دوباره تلاش کنید.",
+  "The port is already in use": "پورت از قبل در حال استفاده است",
+  "Another app (such as Nekoray or v2rayN) is using it. Close that app or change the Local port in Settings.": "برنامه‌ی دیگری (مثل Nekoray یا v2rayN) از آن استفاده می‌کند. آن را ببندید یا پورت محلی را در تنظیمات عوض کنید.",
+  "TUN mode needs administrator rights": "حالت TUN دسترسی ادمین می‌خواهد",
+  "Close Vanish and run it as administrator, or switch to System Proxy mode.": "Vanish را ببندید و با Run as administrator اجرا کنید، یا حالت پراکسی سیستم را انتخاب کنید.",
+  "The connection could not start": "اتصال برقرار نشد",
+  "This server's config may be invalid. Try another server.": "ممکن است کانفیگ این سرور مشکل داشته باشد. سرور دیگری را امتحان کنید.",
+  "The connection engine was not found": "موتور اتصال (sing-box) پیدا نشد",
+  "Reinstall Vanish, or set the sing-box path in Settings.": "Vanish را دوباره نصب کنید یا مسیر sing-box را در تنظیمات بدهید.",
+  "The engine is not responding": "موتور اتصال پاسخ نمی‌دهد",
+  "Try again. If it keeps happening, check the Core log.": "دوباره تلاش کنید. اگر تکرار شد، لاگ هسته را ببینید.",
+  "Could not change the Windows proxy": "تنظیم پراکسی ویندوز ممکن نشد",
+  "Another program may be controlling proxy settings. Try TUN mode instead.": "ممکن است برنامه‌ی دیگری تنظیمات پراکسی را کنترل کند. حالت TUN را امتحان کنید.",
+  "The subscription returned nothing": "اشتراک چیزی برنگرداند",
+  "Check the link, and that the account on that panel is still active.": "لینک را بررسی کنید و ببینید اشتراک شما در آن پنل هنوز فعال است.",
+  "No usable servers found": "سرور قابل استفاده‌ای پیدا نشد",
+  "The list is empty or its format is not supported.": "فهرست خالی است یا قالب آن پشتیبانی نمی‌شود.",
+  "The server refused access": "سرور اجازه‌ی دسترسی نداد",
+  "The link may have expired or the token in it is wrong.": "ممکن است لینک منقضی شده یا توکن آن اشتباه باشد.",
+  "Link not found": "لینک پیدا نشد",
+  "Check the subscription link for typos.": "لینک اشتراک را از نظر اشتباه تایپی بررسی کنید.",
+  "The server had a problem": "سرور مشکل دارد",
+  "This is on the provider's side. Try again later.": "مشکل از طرف ارائه‌دهنده است. بعداً دوباره تلاش کنید.",
+  "The speed test server is unreachable": "سرور تست سرعت در دسترس نیست",
+  "Check your connection or try another server.": "اتصال را بررسی کنید یا سرور دیگری را امتحان کنید.",
+  "Could not reach the server": "اتصال به سرور ممکن نشد",
+  "Check your internet connection and the link. If the site is blocked, connect through a working server first.": "اینترنت و لینک را بررسی کنید. اگر سایت فیلتر است، اول با یک سرور سالم وصل شوید.",
+  "Unsupported link": "لینک پشتیبانی نمی‌شود",
+  "Supported: vless, vmess, trojan, ss, wireguard links, or sing-box JSON.": "پشتیبانی‌شده: لینک vless، vmess، trojan، ss، wireguard یا JSON خروجی sing-box.",
+  "The config link looks damaged": "لینک کانفیگ خراب به نظر می‌رسد",
+  "Copy it again in full and retry.": "آن را کامل دوباره کپی کنید و تلاش کنید.",
+  "Could not detect the exit IP": "IP خروجی شناسایی نشد",
+  "The lookup service did not answer. The connection itself may still work.": "سرویس جستجو جواب نداد. ممکن است خود اتصال سالم باشد.",
+  "No server answered": "هیچ سروری پاسخ نداد",
+  "All servers look unreachable. Check your internet connection or update the subscription.": "همه‌ی سرورها در دسترس نیستند. اینترنت را بررسی کنید یا اشتراک را به‌روزرسانی کنید.",
+  "The update failed": "به‌روزرسانی انجام نشد",
+  "Check your internet connection and try again.": "اینترنت را بررسی کنید و دوباره تلاش کنید.",
+  "Could not save your changes": "تغییرات ذخیره نشد",
+  "Vanish could not write to its data folder. Check disk space and permissions.": "Vanish نتوانست در پوشه‌ی داده‌هایش بنویسد. فضای دیسک و دسترسی‌ها را بررسی کنید.",
 };
 
 export function t(key: string, params?: Record<string, string | number>): string {
@@ -262,6 +338,58 @@ const faDetails: [RegExp, string][] = [
   [/^No IPv6 connectivity, nothing to leak\.$/, "IPv6 فعال نیست، چیزی برای نشت وجود ندارد."],
   [/^(download|upload) failed: (.+)$/, "خطا در $1: $2"],
 ];
+
+export interface FriendlyError {
+  title: string;
+  hint: string;
+  /** The original message from the app, kept for the "technical details" view. */
+  raw: string;
+}
+
+// Raw messages come from the Rust side (and the OS) in English. Each rule turns one family of them into a plain
+// sentence plus what the user can do about it. The first match wins, so specific rules go before general ones.
+const errorRules: [RegExp, string, string][] = [
+  [/must start with http/i, "This link isn't valid", "A subscription link must start with http:// or https://."],
+  [/already imported/i, "Already added", "This subscription is already in your list."],
+  [/name cannot be empty/i, "The name is empty", "Type a name and try again."],
+  [/^not connected|connect first/i, "You are not connected", "Connect first, then run this again."],
+  [/already running/i, "A test is already running", "Wait for it to finish."],
+  [/xray-core fallback/i, "This engine isn't available yet", "Switch the engine to sing-box and try again."],
+  [/core exited[\s\S]*(address already in use|only one usage|bind:)/i, "The port is already in use", "Another app (such as Nekoray or v2rayN) is using it. Close that app or change the Local port in Settings."],
+  [/core exited[\s\S]*(access is denied|permission denied|administrator|privilege|wintun|configure tun|create tun)/i, "TUN mode needs administrator rights", "Close Vanish and run it as administrator, or switch to System Proxy mode."],
+  [/core exited/i, "The connection could not start", "This server's config may be invalid. Try another server."],
+  [/cannot start .*(os error|cannot find|not found|no such file)/i, "The connection engine was not found", "Reinstall Vanish, or set the sing-box path in Settings."],
+  [/did not become ready/i, "The engine is not responding", "Try again. If it keeps happening, check the Core log."],
+  [/failed to set system proxy/i, "Could not change the Windows proxy", "Another program may be controlling proxy settings. Try TUN mode instead."],
+  [/empty response from server/i, "The subscription returned nothing", "Check the link, and that the account on that panel is still active."],
+  [/no usable nodes/i, "No usable servers found", "The list is empty or its format is not supported."],
+  [/\(40[13]\b/, "The server refused access", "The link may have expired or the token in it is wrong."],
+  [/\(404\b/, "Link not found", "Check the subscription link for typos."],
+  [/\(5\d\d\b/, "The server had a problem", "This is on the provider's side. Try again later."],
+  [/speed server unreachable/i, "The speed test server is unreachable", "Check your connection or try another server."],
+  [/error sending request|dns error|connection (refused|reset|closed)|timed out|timeout|unreachable/i, "Could not reach the server", "Check your internet connection and the link. If the site is blocked, connect through a working server first."],
+  [/unsupported link/i, "Unsupported link", "Supported: vless, vmess, trojan, ss, wireguard links, or sing-box JSON."],
+  [/^(bad link|vmess:|ss:|wireguard:)/i, "The config link looks damaged", "Copy it again in full and retry."],
+  [/exit ip lookup failed/i, "Could not detect the exit IP", "The lookup service did not answer. The connection itself may still work."],
+  [/no node answered/i, "No server answered", "All servers look unreachable. Check your internet connection or update the subscription."],
+  [/updat|signature|pubkey/i, "The update failed", "Check your internet connection and try again."],
+  [/os error|permission|denied|no space|read-only/i, "Could not save your changes", "Vanish could not write to its data folder. Check disk space and permissions."],
+];
+
+/** Turns whatever a command rejected with into a title and a next step the user can act on. */
+export function friendlyError(e: unknown): FriendlyError {
+  const raw = String(e instanceof Error ? e.message : e).trim();
+  for (const [re, title, hint] of errorRules) {
+    if (re.test(raw)) return { title: t(title), hint: t(hint), raw };
+  }
+  return { title: t("Something went wrong"), hint: t("Try again. If it keeps happening, open the Core log from the top bar."), raw };
+}
+
+/** One-line form for places that only have room for a string. */
+export function errorText(e: unknown): string {
+  const f = friendlyError(e);
+  return `${f.title}. ${f.hint}`;
+}
 
 export function tDetail(s: string): string {
   if (lang.value !== "fa") return s;

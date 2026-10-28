@@ -1,6 +1,6 @@
 import { computed, reactive } from "vue";
 import { listen } from "@tauri-apps/api/event";
-import { t } from "../lib/i18n";
+import { errorText, friendlyError, t } from "../lib/i18n";
 import {
   api,
   type CoreStatus,
@@ -24,6 +24,8 @@ export const store = reactive({
   status: { running: false, node_id: null, blocked: false } as CoreStatus,
   busy: false,
   error: "" as string,
+  errorHint: "" as string,
+  errorRaw: "" as string,
   notice: "" as string,
   latency: null as number | null,
   exit: null as ExitInfo | null,
@@ -67,6 +69,17 @@ export const selectedNode = computed(() => store.nodes.find((n) => n.id === stor
 function push(arr: number[], v: number) {
   arr.push(v);
   if (arr.length > HISTORY) arr.shift();
+}
+
+export function fail(e: unknown) {
+  const f = friendlyError(e);
+  store.error = f.title;
+  store.errorHint = f.hint;
+  store.errorRaw = f.raw;
+}
+
+export function clearError() {
+  store.error = store.errorHint = store.errorRaw = "";
 }
 
 let noticeTimer: ReturnType<typeof setTimeout> | undefined;
@@ -147,11 +160,11 @@ export async function init() {
 
 async function guarded<T>(fn: () => Promise<T>): Promise<T | undefined> {
   store.busy = true;
-  store.error = "";
+  clearError();
   try {
     return await fn();
   } catch (e) {
-    store.error = String(e);
+    fail(e);
   } finally {
     store.busy = false;
   }
@@ -170,7 +183,7 @@ export async function measureLatency() {
     await refreshNodes();
   } catch (e) {
     store.latency = null;
-    store.error = String(e);
+    fail(e);
     return;
   }
   try {
@@ -203,7 +216,7 @@ export async function connectFastest() {
     const id = await api.pickFastest();
     await refreshNodes();
     store.settings = await api.getSettings();
-    if (!id) throw t("no node answered the TCP ping");
+    if (!id) throw "no node answered the TCP ping";
     const name = store.nodes.find((n) => n.id === id)?.name ?? "";
     notify(t("Fastest: {name}", { name }));
     await reconnectIfRunning();
@@ -270,7 +283,7 @@ export async function updateSettings(patch: Partial<Settings>) {
     await api.setSettings(next);
     store.settings = next;
   } catch (e) {
-    store.error = String(e);
+    fail(e);
     return;
   }
   // Routing, DNS and ports are part of the generated config: apply them to a running core right away.
@@ -281,7 +294,7 @@ export async function updateSettings(patch: Partial<Settings>) {
 export async function realDelay(ids: string[]) {
   if (store.delayTesting || !ids.length) return;
   store.delayTesting = true;
-  store.error = "";
+  clearError();
   ids.forEach((id) => {
     const n = store.nodes.find((x) => x.id === id);
     if (n) n.delay = null;
@@ -289,7 +302,7 @@ export async function realDelay(ids: string[]) {
   try {
     await api.realDelay(ids);
   } catch (e) {
-    store.error = String(e);
+    fail(e);
   } finally {
     store.delayTesting = false;
     await refreshNodes();
@@ -313,7 +326,7 @@ export async function runSpeedTest() {
     store.speed.partial = { ping: r.ping_ms, download: r.download_mbps, upload: r.upload_mbps };
     store.speed.live = r.download_mbps;
   } catch (e) {
-    store.speed.error = String(e);
+    store.speed.error = errorText(e);
   } finally {
     store.speed.running = false;
     store.speed.phase = "done";
@@ -326,7 +339,7 @@ export async function runDiagnostics() {
   try {
     store.diag.result = await api.diagnostics();
   } catch (e) {
-    store.diag.error = String(e);
+    store.diag.error = errorText(e);
   } finally {
     store.diag.running = false;
   }
@@ -345,7 +358,7 @@ export async function resetSettings() {
     await reconnectIfRunning();
     notify(t("Settings restored to defaults"));
   } catch (e) {
-    store.error = String(e);
+    fail(e);
   }
 }
 
@@ -355,7 +368,7 @@ export async function checkForUpdate(): Promise<string> {
     store.update = await api.checkUpdate();
     return store.update ? t("Version {v} is available", { v: store.update.version }) : t("You are on the latest version");
   } catch (e) {
-    return t("Could not check for updates: {e}", { e: String(e) });
+    return t("Could not check for updates: {e}", { e: friendlyError(e).title });
   }
 }
 
@@ -364,7 +377,7 @@ export async function installUpdate() {
   try {
     await api.installUpdate(); // restarts the app on success
   } catch (e) {
-    store.error = String(e);
+    fail(e);
     store.updating = false;
   }
 }

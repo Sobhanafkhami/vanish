@@ -125,7 +125,7 @@ const word = { ok: "OK", warn: "Warning", fail: "Problem", info: "Info" } as con
         </svg>
       </template>
 
-      <p v-if="sp.error" class="mt-3 rounded-lg border border-red-500/40 p-2 font-mono text-xs text-red-300" role="alert">{{ sp.error }}</p>
+      <p v-if="sp.error" class="mt-3 rounded-lg border border-red-500/40 p-2 text-xs text-red-300" role="alert">{{ sp.error }}</p>
       <ul v-if="r?.notes.length" class="mt-3 space-y-1">
         <li v-for="n in r.notes" :key="n" class="flex items-start gap-2 text-xs text-yellow-300" role="alert"><TriangleAlert :size="13" class="mt-0.5 shrink-0" /> {{ tDetail(n) }}</li>
       </ul>
@@ -152,7 +152,7 @@ const word = { ok: "OK", warn: "Warning", fail: "Problem", info: "Info" } as con
           </div>
         </li>
       </ul>
-      <p v-if="store.diag.error" class="rounded-lg border border-red-500/40 p-2 font-mono text-xs text-red-300" role="alert">{{ store.diag.error }}</p>
+      <p v-if="store.diag.error" class="rounded-lg border border-red-500/40 p-2 text-xs text-red-300" role="alert">{{ store.diag.error }}</p>
       <button class="btn mt-3" :disabled="store.diag.running" @click="runDiagnostics">
         <Play :size="13" /> {{ store.diag.running ? t("Checking…") : store.diag.result ? t("Run again") : t("Run test") }}
       </button>

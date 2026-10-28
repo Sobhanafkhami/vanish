@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { t } from "../lib/i18n";
 import { computed, nextTick, ref } from "vue";
-import { Activity, ArrowDown, ArrowDownUp, ArrowUp, Check, ClipboardPaste, Pencil, QrCode, RefreshCw, Search, Timer, Trash2, X, Zap } from "lucide-vue-next";
+import { Activity, ArrowDown, ArrowDownUp, ArrowUp, Check, ChevronDown, ClipboardPaste, Pencil, Plus, QrCode, RefreshCw, Search, Timer, Trash2, X, Zap } from "lucide-vue-next";
 import SubUsage from "./SubUsage.vue";
 import { fmtBytes, subUsage, usageTone } from "../lib/usage";
 import {
@@ -23,6 +23,7 @@ const subName = ref("");
 const subUrl = ref("");
 const importKind = ref<"sub" | "links">("sub");
 const showImport = ref(false);
+const showTest = ref(false);
 const message = ref("");
 const query = ref("");
 const sortByPing = ref(false);
@@ -122,22 +123,36 @@ async function deleteSub() {
 
 <template>
   <div class="panel flex min-h-0 flex-1 flex-col p-4">
-    <div class="mb-3 flex items-center justify-between">
-      <span class="hud-label">{{ t("Nodes ·") }} {{ visible.length }}</span>
-      <div class="flex gap-2">
-        <button class="btn" :disabled="store.busy || !store.nodes.length" :title="t('Ping all, then select the quickest')" @click="connectFastest">
+    <div class="mb-3 flex items-center justify-between gap-2">
+      <h2 class="flex items-baseline gap-2 text-sm font-semibold text-white">
+        {{ t("Servers") }}
+        <span class="font-mono text-xs font-normal text-white/45">{{ visible.length }}</span>
+      </h2>
+      <div class="flex items-center gap-2">
+        <button class="btn !border-accent/40 !text-accent-soft" :disabled="store.busy || !store.nodes.length" :title="t('Ping all, then select the quickest')" @click="connectFastest">
           <Zap :size="13" /> {{ t("Fastest") }}
         </button>
-        <button class="btn" :disabled="store.busy || !store.nodes.length" :title="t('TCP connect time to each server')" @click="pingAll"><Activity :size="13" /> {{ t("TCP ping") }}</button>
-        <button
-          class="btn"
-          :disabled="store.delayTesting || !visible.length"
-          :title="t('Real HTTP request through each node, like URL test')"
-          @click="realDelay(visible.map((n) => n.id))"
-        >
-          <Timer :size="13" /> {{ store.delayTesting ? t("Testing…") : t("Real delay") }}
+        <div class="relative">
+          <button class="btn" :aria-expanded="showTest" :disabled="!store.nodes.length" @click="showTest = !showTest">
+            <Timer :size="13" /> {{ store.delayTesting ? t("Testing…") : t("Test") }} <ChevronDown :size="12" class="transition" :class="{ 'rotate-180': showTest }" />
+          </button>
+          <template v-if="showTest">
+            <button class="fixed inset-0 z-10 cursor-default" tabindex="-1" aria-hidden="true" @click="showTest = false"></button>
+            <div class="absolute end-0 top-full z-20 mt-1 w-64 rounded-xl border border-ink-line bg-ink-raised p-1 shadow-xl" role="menu">
+              <button class="menu-item" role="menuitem" :disabled="store.busy" @click="showTest = false; pingAll()">
+                <Activity :size="14" class="mt-0.5 shrink-0 text-accent-soft" />
+                <span><span class="block text-xs text-white/90">{{ t("TCP ping") }}</span><span class="block text-[11px] text-white/45">{{ t("TCP connect time to each server") }}</span></span>
+              </button>
+              <button class="menu-item" role="menuitem" :disabled="store.delayTesting || !visible.length" @click="showTest = false; realDelay(visible.map((n) => n.id))">
+                <Timer :size="14" class="mt-0.5 shrink-0 text-accent-soft" />
+                <span><span class="block text-xs text-white/90">{{ t("Real delay") }}</span><span class="block text-[11px] text-white/45">{{ t("Real HTTP request through each node, like URL test") }}</span></span>
+              </button>
+            </div>
+          </template>
+        </div>
+        <button class="btn" :class="{ '!border-accent/50 !text-accent-soft': showImport }" :aria-expanded="showImport" @click="showImport = !showImport">
+          <Plus :size="13" /> {{ t("Import") }}
         </button>
-        <button class="btn" @click="showImport = !showImport"><ClipboardPaste :size="13" /> {{ t("Import") }}</button>
       </div>
     </div>
 
@@ -268,20 +283,24 @@ async function deleteSub() {
     </div>
 
     <div class="-me-2 flex-1 space-y-2 overflow-y-auto pe-2">
-      <div v-if="!store.nodes.length" class="grid h-full place-items-center text-center text-xs text-white/40">
-        {{ t("No nodes yet.") }}<br />{{ t("Import a subscription or paste a config link.") }}
+      <div v-if="!store.nodes.length" class="grid h-full place-items-center text-center">
+        <div>
+          <p class="text-sm text-white/70">{{ t("No nodes yet.") }}</p>
+          <p class="mt-1 text-xs text-white/40">{{ t("Import a subscription or paste a config link.") }}</p>
+          <button class="btn mt-3" @click="showImport = true"><Plus :size="13" /> {{ t("Import") }}</button>
+        </div>
       </div>
       <div v-else-if="!visible.length" class="grid h-full place-items-center text-center text-xs text-white/40">{{ t("No nodes match.") }}</div>
       <div
         v-for="n in visible"
         :key="n.id"
         class="group flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-2 transition"
-        :class="store.settings?.selected_node === n.id ? 'border-accent/50 bg-accent/5' : 'border-ink-line bg-white/[0.02] hover:border-white/20'"
+        :class="store.settings?.selected_node === n.id ? 'border-accent/50 bg-accent/10' : 'border-transparent bg-white/[0.03] hover:bg-white/[0.06]'"
         @click="selectNode(n.id)"
       >
-        <span class="rounded border border-ink-line px-1.5 py-0.5 font-mono text-[9px] uppercase text-accent-soft">{{ n.protocol }}</span>
+        <span class="w-14 shrink-0 rounded bg-white/5 px-1.5 py-0.5 text-center font-mono text-[10px] uppercase text-white/60">{{ n.protocol }}</span>
         <div class="min-w-0 flex-1">
-          <div class="truncate text-sm text-white/90">{{ n.name }}</div>
+          <div class="truncate text-sm" :class="store.settings?.selected_node === n.id ? 'font-medium text-white' : 'text-white/90'">{{ n.name }}</div>
           <div class="flex items-center gap-2 truncate font-mono text-[10px] text-white/45">
             <span class="truncate">{{ n.server }}:{{ n.port }}</span>
             <span v-if="n.up_total || n.down_total" class="flex shrink-0 items-center gap-1.5" :title="t('Total traffic through this node')">
@@ -290,9 +309,15 @@ async function deleteSub() {
             </span>
           </div>
         </div>
-        <div class="w-16 shrink-0 text-end font-mono leading-tight">
-          <div class="text-xs" :class="latencyClass(n.delay !== null && n.delay < 0 ? 99999 : n.delay, 400, 800)" :title="t('Real HTTP delay')">{{ delayText(n.delay) }}</div>
-          <div class="text-[10px]" :class="latencyClass(n.latency)" :title="t('TCP ping')">{{ t("tcp") }} {{ n.latency === null ? "—" : n.latency }}</div>
+        <div class="w-20 shrink-0 text-end font-mono leading-tight" :title="n.delay !== null && n.delay > 0 ? t('Real HTTP delay through this server') : t('TCP connect time')">
+          <template v-if="n.delay !== null">
+            <div class="text-sm" :class="latencyClass(n.delay < 0 ? 99999 : n.delay, 400, 800)">{{ delayText(n.delay) }}</div>
+          </template>
+          <template v-else-if="n.latency !== null">
+            <div class="text-sm" :class="latencyClass(n.latency)">{{ n.latency }} <span class="text-[10px] text-white/40">{{ t("ms") }}</span></div>
+            <div class="text-[10px] text-white/35">{{ t("tcp") }}</div>
+          </template>
+          <div v-else class="text-sm text-white/25">{{ store.delayTesting ? "…" : "—" }}</div>
         </div>
         <button
           v-if="n.link"

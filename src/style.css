@@ -21,8 +21,11 @@ body,
   .panel.active {
     @apply border-accent/40;
   }
+  .menu-item {
+    @apply flex w-full cursor-pointer items-start gap-2 rounded-lg px-3 py-2 text-start transition hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-40;
+  }
   .hud-label {
-    @apply font-mono text-[10px] uppercase tracking-[0.2em] text-white/50;
+    @apply font-mono text-[11px] uppercase tracking-[0.18em] text-white/55;
   }
   .btn {
     @apply inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-ink-line bg-white/[0.03] px-3 py-1.5 text-xs text-white/80 transition hover:border-accent/50 hover:text-white disabled:cursor-not-allowed disabled:opacity-40;
@@ -81,7 +84,8 @@ html[lang="fa"] select {
   font-family: Vazirmatn, "Segoe UI", Tahoma, system-ui, sans-serif;
 }
 html[lang="fa"] .font-mono {
-  font-family: ui-monospace, "Cascadia Mono", Consolas, Vazirmatn, monospace;
+  /* Vazirmatn first: a monospace stack falls back to a tiny Arabic-script face */
+  font-family: Vazirmatn, "Segoe UI", Tahoma, sans-serif;
   /* numbers + units ("340 ms", "2.79 GB") must keep their order inside right-to-left text */
 }
 html[lang="fa"] .font-mono,
@@ -91,4 +95,32 @@ html[lang="fa"] .font-mono * {
 html[lang="fa"] * {
   letter-spacing: normal !important;
   text-transform: none !important;
+}
+
+/* Persian glyphs are drawn smaller than Latin ones at the same size and need more line height, so every size
+   steps up by about 2px. The fixed 9-11px sizes used for HUD labels are the ones that became unreadable. */
+html[lang="fa"] body {
+  line-height: 1.7;
+}
+html[lang="fa"] .text-\[9px\],
+html[lang="fa"] .text-\[10px\] {
+  font-size: 12px;
+  line-height: 1.6;
+}
+html[lang="fa"] .text-\[11px\] {
+  font-size: 12.5px;
+}
+html[lang="fa"] .text-xs {
+  font-size: 0.8125rem;
+  line-height: 1.5rem;
+}
+html[lang="fa"] .text-sm {
+  font-size: 0.9375rem;
+  line-height: 1.6rem;
+}
+html[lang="fa"] .text-lg {
+  font-size: 1.1875rem;
+}
+html[lang="fa"] .hud-label {
+  font-size: 12px;
 }
