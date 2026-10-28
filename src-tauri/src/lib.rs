@@ -16,14 +16,24 @@ use tauri::{Manager, WindowEvent};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
-        // A second launch must not spawn a second process: two instances would fight over
-        // the data files and the sing-box ports. Focus the running one instead.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| tray::show_main(app)))
+    let builder = tauri::Builder::default();
+    // A second launch must not spawn a second process: two instances would fight over
+    // the data files and the sing-box ports. Focus the running one instead.
+    // Dev builds are exempt (and use their own data folder, see setup) so `tauri dev` can run
+    // next to an installed Vanish.
+    #[cfg(not(debug_assertions))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| tray::show_main(app)));
+    builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
-            let dir = app.path().app_data_dir()?;
+            #[allow(unused_mut)]
+            let mut dir = app.path().app_data_dir()?;
+            // Separate nodes/settings so the dev copy cannot overwrite the installed app's files.
+            #[cfg(debug_assertions)]
+            {
+                dir.set_file_name(format!("{}.dev", dir.file_name().and_then(|n| n.to_str()).unwrap_or("app.vanish.client")));
+            }
             std::fs::create_dir_all(dir.join("bin"))?;
             app.manage(state::AppState::load(dir));
             tray::init(app.handle())?;

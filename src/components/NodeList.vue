@@ -311,7 +311,7 @@ async function deleteSub() {
             </span>
           </div>
         </div>
-        <div class="w-20 shrink-0 text-end font-mono leading-tight" :title="n.delay !== null && n.delay > 0 ? t('Real HTTP delay through this server') : t('TCP connect time')">
+        <div class="w-24 shrink-0 whitespace-nowrap text-end font-mono leading-tight" :title="n.delay !== null && n.delay > 0 ? t('Real HTTP delay through this server') : t('TCP connect time')">
           <template v-if="n.delay !== null">
             <div class="text-sm" :class="latencyClass(n.delay < 0 ? 99999 : n.delay, 400, 800)">{{ delayText(n.delay) }}</div>
           </template>

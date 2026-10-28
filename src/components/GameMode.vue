@@ -32,9 +32,9 @@ const bars = computed(() =>
   <div class="panel shrink-0 overflow-hidden px-4 py-3" :class="{ 'game-on': on }">
     <div class="flex items-center justify-between gap-3">
       <span class="flex items-center gap-2">
-        <span class="relative grid h-7 w-7 place-items-center rounded-lg transition-colors duration-300" :class="on ? 'bg-accent/15 text-accent-soft' : 'bg-white/5 text-white/50'">
+        <span class="relative flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors duration-300" :class="on ? 'bg-accent/15 text-accent-soft' : 'bg-white/5 text-white/50'">
           <span v-if="on" class="absolute inset-0 animate-ping rounded-lg bg-accent/20" aria-hidden="true"></span>
-          <Gamepad2 :size="16" class="relative" />
+          <Gamepad2 :size="16" class="relative block" />
         </span>
         <span>
           <span class="block text-sm font-semibold text-white">{{ t("Game mode") }}</span>

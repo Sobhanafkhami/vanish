@@ -144,7 +144,7 @@ html[lang="fa"] .hud-label {
 }
 
 /* Sonar ring that fans out from the power button while connected. */
-@keyframes ring {
+@keyframes sonar {
   0% {
     transform: scale(0.95);
     opacity: 0.7;
@@ -154,8 +154,8 @@ html[lang="fa"] .hud-label {
     opacity: 0;
   }
 }
-.ring {
-  animation: ring 2.4s ease-out infinite;
+.sonar {
+  animation: sonar 2.4s ease-out infinite;
 }
 
 /* Soft colour wash behind the UI; drifts slowly and warms to green when connected. */
@@ -181,14 +181,16 @@ html[lang="fa"] .hud-label {
   position: absolute;
   border-radius: 9999px;
   filter: blur(90px);
-  opacity: 0.22;
-  background: #1d4ed8;
-  transition: background-color 1.2s ease, opacity 1.2s ease;
-  will-change: transform;
+  background: #22c55e;
+  /* hidden until a connection is up, then blooms in */
+  opacity: 0;
+  scale: 0.5;
+  transition: opacity 1.4s ease, scale 1.6s cubic-bezier(0.2, 0.7, 0.2, 1);
+  will-change: transform, opacity;
 }
 .ambient.is-on {
-  background: #22c55e;
   opacity: 0.2;
+  scale: 1;
 }
 .ambient-a {
   top: -140px;

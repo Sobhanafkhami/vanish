@@ -15,8 +15,8 @@ const label = computed(() => (store.busy ? "Working" : on.value ? "Connected" : 
       <span v-if="on" class="absolute inset-3 animate-backdrop-pulse rounded-full bg-accent/40 blur-2xl"></span>
       <!-- sonar rings while connected, a spinning arc while connecting -->
       <template v-if="on && !store.busy">
-        <span class="ring absolute h-24 w-24 rounded-full border border-accent/40" aria-hidden="true"></span>
-        <span class="ring absolute h-24 w-24 rounded-full border border-accent/30" style="animation-delay: 1.2s" aria-hidden="true"></span>
+        <span class="sonar absolute h-24 w-24 rounded-full border border-accent/40" aria-hidden="true"></span>
+        <span class="sonar absolute h-24 w-24 rounded-full border border-accent/30" style="animation-delay: 1.2s" aria-hidden="true"></span>
       </template>
       <span v-if="store.busy" class="absolute h-[104px] w-[104px] animate-spin rounded-full border-2 border-transparent border-t-accent-soft" style="animation-duration: 0.9s" aria-hidden="true"></span>
       <button

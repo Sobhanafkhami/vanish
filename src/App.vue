@@ -25,7 +25,12 @@ const modes = [
 // Game mode always runs on TUN (games use UDP and ignore the system proxy), so the selector shows and locks that.
 const gameOn = computed(() => !!store.settings?.game_mode);
 const activeMode = computed(() => (gameOn.value ? "tun" : store.settings?.mode));
-const modeHint = computed(() => modes.find((m) => m.id === activeMode.value)?.hint ?? "");
+const hints = [
+  ...modes.map((m) => ({ key: m.id as string, text: m.hint as string })),
+  { key: "game", text: "Game mode uses TUN." },
+  { key: "running", text: "Disconnect to change the mode." },
+];
+const hintKey = computed(() => (gameOn.value ? "game" : store.status.running ? "running" : (activeMode.value ?? "system_proxy")));
 const modeLocked = computed(() => store.status.running || gameOn.value);
 
 const showDetails = ref(false);
@@ -73,7 +78,7 @@ function dismissError() {
           <ConnectButton />
 
           <div class="w-full">
-            <div class="grid grid-cols-3 gap-1 rounded-lg border border-ink-line bg-black/40 p-1" role="radiogroup" :aria-label="t('Mode')">
+            <div class="grid grid-cols-[1.5fr_1fr_1fr] gap-1 rounded-lg border border-ink-line bg-black/40 p-1" role="radiogroup" :aria-label="t('Mode')">
               <button
                 v-for="m in modes"
                 :key="m.id"
@@ -81,16 +86,25 @@ function dismissError() {
                 :aria-checked="activeMode === m.id"
                 :disabled="modeLocked"
                 :title="gameOn ? t('Game mode uses TUN.') : store.status.running ? t('Disconnect to change the mode.') : t(m.hint)"
-                class="rounded-md px-2 py-1.5 text-xs transition disabled:cursor-not-allowed"
+                class="h-8 whitespace-nowrap rounded-md px-1 text-xs transition disabled:cursor-not-allowed"
                 :class="activeMode === m.id ? 'bg-accent/15 font-semibold text-accent-soft' : 'text-white/55 hover:text-white/85 disabled:hover:text-white/55'"
                 @click="setMode(m.id)"
               >
                 {{ t(m.label) }}
               </button>
             </div>
-            <p class="mt-2 min-h-[2.5rem] text-center text-[11px] leading-snug text-white/45">
-              {{ gameOn ? t("Game mode uses TUN.") : store.status.running ? t("Disconnect to change the mode.") : t(modeHint) }}
-            </p>
+            <!-- every hint sits in the same grid cell, so the box is always as tall as the longest one and never jumps -->
+            <div class="mt-2 grid text-center text-[11px] leading-snug text-white/45" aria-live="polite">
+              <p
+                v-for="h in hints"
+                :key="h.key"
+                class="col-start-1 row-start-1 transition-opacity duration-200"
+                :class="h.key === hintKey ? 'opacity-100' : 'pointer-events-none opacity-0'"
+                :aria-hidden="h.key !== hintKey"
+              >
+                {{ t(h.text) }}
+              </p>
+            </div>
           </div>
         </div>
 
