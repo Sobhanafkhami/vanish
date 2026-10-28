@@ -7,7 +7,7 @@ body,
 #app {
   height: 100%;
   margin: 0;
-  background: transparent; /* the window itself is transparent (Mica) */
+  background: #070908; /* opaque window: no DWM glass/border around the app */
   color: #e4ebe6;
   font-family: Inter, "Segoe UI", system-ui, sans-serif;
   overflow: hidden;

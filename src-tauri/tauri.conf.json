@@ -22,14 +22,10 @@
         "center": true,
         "resizable": true,
         "decorations": false,
-        "transparent": true,
+        "transparent": false,
         "shadow": true,
         "theme": "Dark",
-        "windowEffects": {
-          "effects": [
-            "mica"
-          ]
-        }
+        "backgroundColor": "#070908"
       }
     ],
     "security": {

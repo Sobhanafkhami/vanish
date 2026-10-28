@@ -26,7 +26,7 @@ const latencyText = computed(() => (store.latency === null ? "---" : String(stor
 
 <template>
   <div
-    class="relative flex h-full flex-col overflow-hidden rounded-xl border border-ink-line bg-ink/95"
+    class="relative flex h-full flex-col overflow-hidden bg-ink"
   >
     <TitleBar />
     <main class="grid min-h-0 flex-1 grid-cols-[320px_1fr] gap-4 p-4">
