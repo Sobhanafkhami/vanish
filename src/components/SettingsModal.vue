@@ -160,7 +160,7 @@ async function onCheck() {
             @keydown.enter="addTyped"
           />
           <button class="btn" :disabled="!appName.trim()" @click="addTyped"><Plus :size="13" /> {{ t("Add") }}</button>
-          <button class="btn" @click="store.ui.appPicker = true"><AppWindow :size="13" /> {{ t("Choose app…") }}</button>
+          <button class="btn" @click="store.ui.appPicker = 'direct'"><AppWindow :size="13" /> {{ t("Choose app…") }}</button>
         </div>
       </div>
     </section>

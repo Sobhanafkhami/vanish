@@ -5,6 +5,7 @@ import { ChevronDown, ChevronRight, Download, Globe, Rocket, RefreshCw, ShieldAl
 import TitleBar from "./components/TitleBar.vue";
 import ConnectButton from "./components/ConnectButton.vue";
 import TrafficMonitor from "./components/TrafficMonitor.vue";
+import GameMode from "./components/GameMode.vue";
 import NodeList from "./components/NodeList.vue";
 import SettingsModal from "./components/SettingsModal.vue";
 import LogsModal from "./components/LogsModal.vue";
@@ -21,7 +22,11 @@ const modes = [
   { id: "manual", label: "Manual", hint: "Only apps you point at the local port." },
 ] as const;
 
-const modeHint = computed(() => modes.find((m) => m.id === store.settings?.mode)?.hint ?? "");
+// Game mode always runs on TUN (games use UDP and ignore the system proxy), so the selector shows and locks that.
+const gameOn = computed(() => !!store.settings?.game_mode);
+const activeMode = computed(() => (gameOn.value ? "tun" : store.settings?.mode));
+const modeHint = computed(() => modes.find((m) => m.id === activeMode.value)?.hint ?? "");
+const modeLocked = computed(() => store.status.running || gameOn.value);
 
 const showDetails = ref(false);
 const showRaw = ref(false);
@@ -47,6 +52,11 @@ function dismissError() {
 
 <template>
   <div class="relative flex h-full flex-col overflow-hidden bg-ink">
+    <!-- slow drifting glow behind everything; turns greener while connected -->
+    <div class="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
+      <span class="ambient ambient-a" :class="{ 'is-on': store.status.running }"></span>
+      <span class="ambient ambient-b" :class="{ 'is-on': store.status.running }"></span>
+    </div>
     <TitleBar />
 
     <Transition name="fade">
@@ -56,10 +66,10 @@ function dismissError() {
       </div>
     </Transition>
 
-    <main class="grid min-h-0 flex-1 grid-cols-[320px_1fr] gap-4 p-4">
+    <main class="relative grid min-h-0 flex-1 grid-cols-[320px_1fr] gap-4 p-4">
       <!-- left: the connection itself -->
       <section class="-me-2 flex min-h-0 flex-col gap-3 overflow-y-auto pe-2">
-        <div class="panel flex shrink-0 flex-col items-center gap-4 px-4 py-5" :class="{ active: store.status.running }">
+        <div class="panel rise flex shrink-0 flex-col items-center gap-4 px-4 py-5" :class="{ active: store.status.running }" style="--d: 0ms">
           <ConnectButton />
 
           <div class="w-full">
@@ -68,24 +78,24 @@ function dismissError() {
                 v-for="m in modes"
                 :key="m.id"
                 role="radio"
-                :aria-checked="store.settings?.mode === m.id"
-                :disabled="store.status.running"
-                :title="store.status.running ? t('Disconnect to change the mode.') : t(m.hint)"
+                :aria-checked="activeMode === m.id"
+                :disabled="modeLocked"
+                :title="gameOn ? t('Game mode uses TUN.') : store.status.running ? t('Disconnect to change the mode.') : t(m.hint)"
                 class="rounded-md px-2 py-1.5 text-xs transition disabled:cursor-not-allowed"
-                :class="store.settings?.mode === m.id ? 'bg-accent/15 font-semibold text-accent-soft' : 'text-white/55 hover:text-white/85 disabled:hover:text-white/55'"
+                :class="activeMode === m.id ? 'bg-accent/15 font-semibold text-accent-soft' : 'text-white/55 hover:text-white/85 disabled:hover:text-white/55'"
                 @click="setMode(m.id)"
               >
                 {{ t(m.label) }}
               </button>
             </div>
             <p class="mt-2 min-h-[2.5rem] text-center text-[11px] leading-snug text-white/45">
-              {{ store.status.running ? t("Disconnect to change the mode.") : t(modeHint) }}
+              {{ gameOn ? t("Game mode uses TUN.") : store.status.running ? t("Disconnect to change the mode.") : t(modeHint) }}
             </p>
           </div>
         </div>
 
         <!-- where you appear to be -->
-        <div class="panel shrink-0 px-4 py-3">
+        <div class="panel rise shrink-0 px-4 py-3" style="--d: 80ms">
           <div class="flex items-center justify-between">
             <span class="flex items-center gap-2">
               <Globe :size="15" class="text-accent-soft" />
@@ -127,9 +137,10 @@ function dismissError() {
           <p v-else class="mt-3 text-xs leading-relaxed text-white/45">{{ t("Connect to see your new location.") }}</p>
         </div>
 
-        <TrafficMonitor />
+        <div class="rise" style="--d: 160ms"><GameMode /></div>
+        <div class="rise" style="--d: 240ms"><TrafficMonitor /></div>
 
-        <button class="panel flex shrink-0 items-center justify-between px-4 py-3 text-start transition hover:border-accent/40" @click="store.ui.tools = true">
+        <button class="panel rise flex shrink-0 items-center justify-between px-4 py-3 text-start transition hover:border-accent/40" style="--d: 320ms" @click="store.ui.tools = true">
           <span class="flex items-center gap-2">
             <Rocket :size="15" class="text-accent-soft" />
             <span class="text-xs text-white/80">{{ t("Speed & leak test") }}</span>
@@ -140,7 +151,7 @@ function dismissError() {
       </section>
 
       <!-- right: servers -->
-      <section class="flex min-h-0 flex-col">
+      <section class="rise flex min-h-0 flex-col" style="--d: 120ms">
         <NodeList />
       </section>
     </main>

@@ -6,6 +6,7 @@ import {
   type CoreStatus,
   type Diagnostics,
   type ExitInfo,
+  type GameStats,
   type Settings,
   type SpeedResult,
   type Subscription,
@@ -52,17 +53,19 @@ export const store = reactive({
     error: "",
   },
   diag: { running: false, result: null as Diagnostics | null, error: "" },
+  game: null as GameStats | null,
   ui: {
     settings: false,
     logs: false,
     tools: false,
-    appPicker: false,
+    /** Which list the app picker adds to, or false when closed. */
+    appPicker: false as false | "direct" | "game",
     qr: null as { title: string; text: string } | null,
   },
 });
 
 /** Settings whose value is baked into the running core's config. */
-const RECONNECT_KEYS: (keyof Settings)[] = ["route_mode", "direct_domains", "direct_apps", "dns_server", "mixed_port", "api_port"];
+const RECONNECT_KEYS: (keyof Settings)[] = ["route_mode", "direct_domains", "direct_apps", "dns_server", "mixed_port", "api_port", "game_mode", "game_apps"];
 
 export const selectedNode = computed(() => store.nodes.find((n) => n.id === store.settings?.selected_node) ?? null);
 
@@ -107,8 +110,10 @@ export async function init() {
       store.up = store.down = 0;
       store.latency = null;
       store.exit = null;
+      store.game = null;
     }
   });
+  await listen<GameStats>("game-stats", (e) => (store.game = e.payload));
   await listen<{ up: number; down: number; up_total: number; down_total: number }>("traffic", (e) => {
     store.up = e.payload.up;
     store.down = e.payload.down;
@@ -350,6 +355,22 @@ export async function addDirectApp(name: string) {
   if (!n || !store.settings) return;
   if (store.settings.direct_apps.some((a) => a.toLowerCase() === n.toLowerCase())) return;
   await updateSettings({ direct_apps: [...store.settings.direct_apps, n] });
+}
+
+export async function setGameMode(on: boolean) {
+  await updateSettings({ game_mode: on });
+}
+
+export async function addGameApp(name: string) {
+  const n = name.trim();
+  if (!n || !store.settings) return;
+  if (store.settings.game_apps.some((a) => a.toLowerCase() === n.toLowerCase())) return;
+  await updateSettings({ game_apps: [...store.settings.game_apps, n] });
+}
+
+export async function removeGameApp(name: string) {
+  if (!store.settings) return;
+  await updateSettings({ game_apps: store.settings.game_apps.filter((a) => a !== name) });
 }
 
 export async function resetSettings() {

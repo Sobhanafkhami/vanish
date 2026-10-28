@@ -124,3 +124,141 @@ html[lang="fa"] .text-lg {
 html[lang="fa"] .hud-label {
   font-size: 12px;
 }
+
+/* ---- motion ---------------------------------------------------------------------------------------------- */
+
+/* Panels slide up one after another when the window opens (--d staggers them). */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.rise {
+  animation: rise 0.55s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  animation-delay: var(--d, 0ms);
+}
+
+/* Sonar ring that fans out from the power button while connected. */
+@keyframes ring {
+  0% {
+    transform: scale(0.95);
+    opacity: 0.7;
+  }
+  100% {
+    transform: scale(1.7);
+    opacity: 0;
+  }
+}
+.ring {
+  animation: ring 2.4s ease-out infinite;
+}
+
+/* Soft colour wash behind the UI; drifts slowly and warms to green when connected. */
+@keyframes drift-a {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(60px, 40px) scale(1.15);
+  }
+}
+@keyframes drift-b {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1.1);
+  }
+  50% {
+    transform: translate(-70px, -30px) scale(0.95);
+  }
+}
+.ambient {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(90px);
+  opacity: 0.22;
+  background: #1d4ed8;
+  transition: background-color 1.2s ease, opacity 1.2s ease;
+  will-change: transform;
+}
+.ambient.is-on {
+  background: #22c55e;
+  opacity: 0.2;
+}
+.ambient-a {
+  top: -140px;
+  left: -120px;
+  width: 380px;
+  height: 380px;
+  animation: drift-a 16s ease-in-out infinite;
+}
+.ambient-b {
+  right: -140px;
+  bottom: -160px;
+  width: 420px;
+  height: 420px;
+  animation: drift-b 20s ease-in-out infinite;
+}
+
+/* Game mode card: a gentle green breathing border while it is on. */
+@keyframes breathe {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0);
+  }
+  50% {
+    box-shadow: 0 0 18px 0 rgba(34, 197, 94, 0.18);
+  }
+}
+.game-on {
+  border-color: rgba(34, 197, 94, 0.4);
+  animation: breathe 3s ease-in-out infinite;
+}
+
+/* Server rows fade in with a short stagger and glide when the list is re-sorted. */
+.row-enter-active {
+  transition: opacity 0.35s ease, transform 0.35s cubic-bezier(0.2, 0.7, 0.2, 1);
+  transition-delay: calc(var(--i, 0) * 25ms);
+}
+.row-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  position: absolute;
+  inset-inline: 0;
+}
+.row-enter-from {
+  opacity: 0;
+  transform: translateX(-10px);
+}
+.row-leave-to {
+  opacity: 0;
+  transform: translateX(10px);
+}
+.row-move {
+  transition: transform 0.3s ease;
+}
+
+.chip-enter-active,
+.chip-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.chip-enter-from,
+.chip-leave-to {
+  opacity: 0;
+  transform: scale(0.85);
+}
+
+/* Buttons respond to a press. */
+.btn {
+  transition: transform 0.12s ease, border-color 0.2s ease, color 0.2s ease, background-color 0.2s ease;
+}
+.btn:active:not(:disabled) {
+  transform: scale(0.96);
+}
+.panel {
+  transition: border-color 0.25s ease, box-shadow 0.3s ease, background-color 0.25s ease;
+}

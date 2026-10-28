@@ -13,11 +13,17 @@ const label = computed(() => (store.busy ? "Working" : on.value ? "Connected" : 
     <div class="relative grid h-36 w-36 place-items-center">
       <!-- green backdrop, only while connected -->
       <span v-if="on" class="absolute inset-3 animate-backdrop-pulse rounded-full bg-accent/40 blur-2xl"></span>
+      <!-- sonar rings while connected, a spinning arc while connecting -->
+      <template v-if="on && !store.busy">
+        <span class="ring absolute h-24 w-24 rounded-full border border-accent/40" aria-hidden="true"></span>
+        <span class="ring absolute h-24 w-24 rounded-full border border-accent/30" style="animation-delay: 1.2s" aria-hidden="true"></span>
+      </template>
+      <span v-if="store.busy" class="absolute h-[104px] w-[104px] animate-spin rounded-full border-2 border-transparent border-t-accent-soft" style="animation-duration: 0.9s" aria-hidden="true"></span>
       <button
         :disabled="store.busy || !selectedNode"
         :aria-pressed="on"
         :aria-label="t(on ? 'Disconnect' : 'Connect')"
-        class="relative grid h-24 w-24 place-items-center rounded-full border transition-colors duration-300 disabled:opacity-50"
+        class="relative grid h-24 w-24 place-items-center rounded-full border transition-all duration-300 hover:scale-[1.04] active:scale-95 disabled:opacity-50 disabled:hover:scale-100"
         :class="on ? 'border-accent/60 bg-ink text-accent-soft' : 'border-ink-line bg-ink-raised text-white/60 hover:text-white'"
         @click="toggleConnection"
       >

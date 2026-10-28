@@ -291,9 +291,11 @@ async function deleteSub() {
         </div>
       </div>
       <div v-else-if="!visible.length" class="grid h-full place-items-center text-center text-xs text-white/40">{{ t("No nodes match.") }}</div>
+      <TransitionGroup name="row" tag="div" class="relative space-y-2">
       <div
-        v-for="n in visible"
+        v-for="(n, i) in visible"
         :key="n.id"
+        :style="{ '--i': Math.min(i, 12) }"
         class="group flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-2 transition"
         :class="store.settings?.selected_node === n.id ? 'border-accent/50 bg-accent/10' : 'border-transparent bg-white/[0.03] hover:bg-white/[0.06]'"
         @click="selectNode(n.id)"
@@ -331,6 +333,7 @@ async function deleteSub() {
           <Trash2 :size="14" />
         </button>
       </div>
+      </TransitionGroup>
     </div>
   </div>
 </template>

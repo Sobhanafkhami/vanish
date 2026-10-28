@@ -31,7 +31,37 @@ fn wireguard_endpoint(ob: &Value, tag: &str) -> Value {
     ep
 }
 
+/// Fills in what a share link cannot express but other clients (v2rayNG, v2Box) apply by default, and the
+/// dial options that keep a game connection alive. Applied on every build, so saved nodes benefit too.
+fn tune_outbound(ob: &mut Value, game: bool) {
+    // Without xudp, VLESS UDP (DNS, voice chat, game traffic) is not carried as full-cone and often stalls.
+    if ob["type"] == "vless" && ob.get("packet_encoding").is_none() {
+        ob["packet_encoding"] = json!("xudp");
+    }
+    // `path=/ws?ed=2048` is the Xray convention for WebSocket early data: the first payload rides in the
+    // handshake, saving a round trip on every new connection. sing-box needs it spelled out.
+    if ob["transport"]["type"] == "ws" && ob["transport"].get("max_early_data").is_none() {
+        let ed = ob["transport"]["path"]
+            .as_str()
+            .and_then(|p| p.split_once('?'))
+            .and_then(|(_, q)| q.split('&').find_map(|kv| kv.strip_prefix("ed=")))
+            .and_then(|v| v.parse::<u32>().ok())
+            .filter(|v| *v > 0);
+        if let Some(ed) = ed {
+            ob["transport"]["max_early_data"] = json!(ed);
+            ob["transport"]["early_data_header_name"] = json!("Sec-WebSocket-Protocol");
+        }
+    }
+    if game {
+        // Short keep-alives hold the NAT mapping open between bursts and notice a dead path quickly.
+        ob["tcp_keep_alive"] = json!("30s");
+        ob["tcp_keep_alive_interval"] = json!("15s");
+        ob["connect_timeout"] = json!("6s");
+    }
+}
+
 pub fn build(node: &Node, s: &Settings) -> Value {
+    let game = s.game_mode;
     let mut outbounds = vec![json!({ "type": "direct", "tag": "direct" })];
     let mut endpoints: Vec<Value> = vec![];
     if node.outbound["type"] == "wireguard" {
@@ -39,6 +69,7 @@ pub fn build(node: &Node, s: &Settings) -> Value {
     } else {
         let mut outbound = node.outbound.clone();
         outbound["tag"] = json!("proxy");
+        tune_outbound(&mut outbound, game);
         outbounds.insert(0, outbound);
     }
 
@@ -56,6 +87,8 @@ pub fn build(node: &Node, s: &Settings) -> Value {
             "auto_route": true,
             "strict_route": true,
             "stack": "mixed",
+            // Full-cone NAT: peers can reach the player directly, which online games rely on.
+            "endpoint_independent_nat": game,
         }));
     }
 
@@ -67,11 +100,16 @@ pub fn build(node: &Node, s: &Settings) -> Value {
         .filter(|d| !d.is_empty())
         .chain(if s.route_mode == RouteMode::Rule { Some(".ir".to_string()) } else { None })
         .collect();
-    let mut rules = vec![
-        json!({ "action": "sniff" }),
-        json!({ "protocol": "dns", "action": "hijack-dns" }),
-        json!({ "ip_is_private": true, "outbound": "direct" }),
-    ];
+    // Sniffing is only worth its cost when a rule needs the destination's domain and the inbound cannot
+    // supply it (TUN). The mixed inbound already knows the host, and sniffing server-first protocols waits for a timeout.
+    let sniff = s.mode == Mode::Tun && !game && !direct_suffixes.is_empty();
+    let mut rules = vec![];
+    if sniff {
+        rules.push(json!({ "action": "sniff" }));
+        rules.push(json!({ "protocol": "dns", "action": "hijack-dns" }));
+    }
+    rules.push(json!({ "port": 53, "action": "hijack-dns" }));
+    rules.push(json!({ "ip_is_private": true, "outbound": "direct" }));
     let apps: Vec<&String> = s.direct_apps.iter().filter(|a| !a.trim().is_empty()).collect();
     if !apps.is_empty() {
         rules.push(json!({ "process_name": apps, "outbound": "direct" }));
@@ -82,10 +120,17 @@ pub fn build(node: &Node, s: &Settings) -> Value {
         // Resolve bypassed domains locally so they do not leak to / depend on the remote resolver.
         dns_rules.push(json!({ "domain_suffix": direct_suffixes, "action": "route", "server": "local" }));
     }
+    // Game mode with a list of games behaves like a route optimizer: only those programs use the tunnel,
+    // everything else keeps its own, shorter path.
+    let game_apps: Vec<&String> = if game { s.game_apps.iter().filter(|a| !a.trim().is_empty()).collect() } else { vec![] };
+    if !game_apps.is_empty() {
+        rules.push(json!({ "process_name": game_apps, "outbound": "proxy" }));
+    }
     let direct_all = s.route_mode == RouteMode::Direct;
+    let route_final_direct = direct_all || !game_apps.is_empty();
     let dns_server = if s.dns_server.trim().is_empty() { "1.1.1.1" } else { s.dns_server.trim() };
 
-    json!({
+    let mut cfg = json!({
         "log": { "level": "info", "timestamp": true },
         "dns": {
             "servers": [
@@ -100,7 +145,7 @@ pub fn build(node: &Node, s: &Settings) -> Value {
         "endpoints": endpoints,
         "route": {
             "rules": rules,
-            "final": if direct_all { "direct" } else { "proxy" },
+            "final": if route_final_direct { "direct" } else { "proxy" },
             "auto_detect_interface": true,
             // Resolves the proxy server's own hostname without going through the tunnel.
             "default_domain_resolver": "local",
@@ -108,7 +153,12 @@ pub fn build(node: &Node, s: &Settings) -> Value {
         "experimental": {
             "clash_api": { "external_controller": format!("127.0.0.1:{}", s.api_port) }
         }
-    })
+    });
+    if game {
+        // One lookup per name: AAAA answers rarely help a game and double the wait on a slow resolver.
+        cfg["dns"]["strategy"] = json!("ipv4_only");
+    }
+    cfg
 }
 
 /// Headless config for the real-delay probe: every node as its own outbound (`n0`, `n1`, ...) plus the
@@ -123,6 +173,7 @@ pub fn probe(nodes: &[&Node], api_port: u16) -> Value {
         } else {
             let mut ob = node.outbound.clone();
             ob["tag"] = json!(tag);
+            tune_outbound(&mut ob, false);
             outbounds.push(ob);
         }
     }
@@ -152,6 +203,7 @@ mod tests {
         }
         let links = [
             "vless://83baf1d4-f357-4baf-872f-d60f6c2c14fa@example.com:443?security=tls&type=ws&path=%2F&sni=example.com#v",
+            "vless://83baf1d4-f357-4baf-872f-d60f6c2c14fa@example.com:443?security=tls&type=ws&path=%2Fws%3Fed%3D2048&sni=example.com#ed",
             "trojan://pw@example.com:443#t",
             "wireguard://cHJpdmF0ZWtleXByaXZhdGVrZXlwcml2YXRla2V5MTI=@example.com:51820?publickey=cHVibGljcHVibGljcHVibGljcHVibGljcHVibGljMTI=&address=10.0.0.2/32#w",
         ];
@@ -169,6 +221,18 @@ mod tests {
                 std::fs::write(&path, serde_json::to_vec(&build(&node, &settings)).unwrap()).unwrap();
                 let out = std::process::Command::new(&bin).args(["check", "-c"]).arg(&path).output().unwrap();
                 assert!(out.status.success(), "{l}: {}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+            }
+        }
+
+        // Game mode: TUN, per-app routing, keep-alives.
+        for l in links {
+            let node = parse_link(l).unwrap();
+            for apps in [vec![], vec!["game.exe".to_string()]] {
+                let settings = Settings { mode: Mode::Tun, game_mode: true, game_apps: apps, ..Settings::default() };
+                let path = std::env::temp_dir().join("vanish-check-game.json");
+                std::fs::write(&path, serde_json::to_vec(&build(&node, &settings)).unwrap()).unwrap();
+                let out = std::process::Command::new(&bin).args(["check", "-c"]).arg(&path).output().unwrap();
+                assert!(out.status.success(), "game {l}: {}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
             }
         }
 

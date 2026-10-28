@@ -97,6 +97,16 @@ export interface Settings {
   auto_fallback: boolean;
   kill_switch: boolean;
   sub_refresh_hours: number;
+  game_mode: boolean;
+  game_apps: string[];
+}
+
+export interface GameStats {
+  ping: number | null;
+  jitter: number;
+  loss: number;
+  /** Recent round trips in ms, -1 = lost probe. */
+  samples: number[];
 }
 
 export interface CoreStatus {

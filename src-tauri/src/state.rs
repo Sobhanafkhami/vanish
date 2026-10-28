@@ -64,7 +64,16 @@ pub struct Settings {
     pub kill_switch: bool,
     /// Hours between automatic subscription refreshes; 0 disables.
     pub sub_refresh_hours: u32,
+    /// Low-latency profile for games: TUN, per-app routing, keep-alives and a live lag monitor.
+    pub game_mode: bool,
+    /// Process names that use the tunnel in game mode. Empty = everything goes through it.
+    pub game_apps: Vec<String>,
 }
+
+/// The default test URL used to be HTTPS, which adds a TLS handshake (extra round trips through the tunnel)
+/// to every cold delay test. Installs that never changed it get the plain-HTTP one.
+pub const OLD_PING_URL: &str = "https://www.gstatic.com/generate_204";
+pub const PING_URL: &str = "http://www.gstatic.com/generate_204";
 
 impl Default for Settings {
     fn default() -> Self {
@@ -75,7 +84,7 @@ impl Default for Settings {
             api_port: 19090,
             core_path: None,
             selected_node: None,
-            ping_url: "https://www.gstatic.com/generate_204".into(),
+            ping_url: PING_URL.into(),
             route_mode: RouteMode::Global,
             direct_domains: vec![],
             direct_apps: vec![],
@@ -85,6 +94,8 @@ impl Default for Settings {
             auto_fallback: false,
             kill_switch: false,
             sub_refresh_hours: 12,
+            game_mode: false,
+            game_apps: vec![],
         }
     }
 }
@@ -166,7 +177,11 @@ impl AppState {
     pub fn load(data_dir: PathBuf) -> Self {
         let mut nodes = read_json::<Vec<Node>>(&data_dir.join("nodes.json"));
         let mut subs = read_json::<Vec<Subscription>>(&data_dir.join("subscriptions.json"));
-        let settings = read_json::<Settings>(&data_dir.join("settings.json"));
+        let mut settings = read_json::<Settings>(&data_dir.join("settings.json"));
+        let url_migrated = settings.ping_url == OLD_PING_URL;
+        if url_migrated {
+            settings.ping_url = PING_URL.into();
+        }
         let migrated = migrate_legacy_subs(&mut nodes, &mut subs) | dedupe_ids(&mut nodes);
         let state = Self {
             data_dir,
@@ -183,6 +198,9 @@ impl AppState {
         if migrated {
             let _ = state.save_nodes();
             let _ = state.save_subs();
+        }
+        if url_migrated {
+            let _ = state.save_settings();
         }
         state
     }

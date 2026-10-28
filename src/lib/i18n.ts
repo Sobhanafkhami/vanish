@@ -235,6 +235,27 @@ const fa: Record<string, string> = {
   "You are on the latest version": "نسخه‌ی شما به‌روز است",
   "Could not check for updates: {e}": "بررسی به‌روزرسانی ممکن نشد: {e}",
 
+  // game mode
+  "Game mode": "گیم مود",
+  "Low lag and a steady connection for online games.": "پینگ پایین و اتصال پایدار برای بازی آنلاین.",
+  "Connect to start monitoring.": "برای شروع پایش، وصل شوید.",
+  "No answer yet": "هنوز پاسخی نیامده",
+  "Measuring…": "در حال اندازه‌گیری…",
+  Excellent: "عالی",
+  Good: "خوب",
+  Playable: "قابل‌بازی",
+  Laggy: "لگ دارد",
+  Jitter: "جیتر",
+  Loss: "افت بسته",
+  Games: "بازی‌ها",
+  "Add game": "افزودن بازی",
+  Remove: "حذف",
+  "Only these games use the tunnel. Everything else stays direct, so it never competes with them.": "فقط این بازی‌ها از تونل استفاده می‌کنند. بقیه مستقیم می‌روند و با بازی رقابت نمی‌کنند.",
+  "No games added: all traffic uses the tunnel.": "بازی‌ای اضافه نشده: همه‌ی ترافیک از تونل می‌گذرد.",
+  "Uses TUN, so run Vanish as administrator. If the server stops answering, Vanish switches to the next-best one within seconds.": "از TUN استفاده می‌کند، پس Vanish را با دسترسی ادمین اجرا کنید. اگر سرور پاسخ ندهد، Vanish ظرف چند ثانیه به بهترین سرور بعدی می‌رود.",
+  "Game mode uses TUN.": "گیم مود از TUN استفاده می‌کند.",
+  "Apps open on this PC. Only the games you pick use the tunnel; everything else stays direct.": "برنامه‌های باز روی این رایانه. فقط بازی‌هایی که انتخاب کنید از تونل می‌گذرند؛ بقیه مستقیم می‌روند.",
+
   // layout
   Servers: "سرورها",
   Mode: "حالت",

@@ -81,6 +81,10 @@ pub async fn start(app: &AppHandle) -> Result<CoreStatus, String> {
 
     let mut settings = state.settings.lock().unwrap().clone();
     // Other proxy apps (Nekoray, v2rayN...) like 2080/7890/9090: fall back to a free port instead of failing.
+    if settings.game_mode {
+        // Games talk UDP and do not follow system proxy settings, so only TUN can carry them.
+        settings.mode = Mode::Tun;
+    }
     settings.mixed_port = free_port(settings.mixed_port, None);
     settings.api_port = free_port(settings.api_port, Some(settings.mixed_port));
     *state.active_ports.lock().unwrap() = (settings.mixed_port, settings.api_port);
@@ -248,16 +252,31 @@ pub async fn tcp_ping(server: &str, port: u16) -> Option<u32> {
     Some(t.elapsed().as_millis() as u32)
 }
 
-/// Real HTTP round-trip through the running core's local mixed inbound.
-pub async fn http_ping(port: u16, url: &str) -> Result<u32, String> {
-    let client = reqwest::Client::builder()
+fn proxied_client(port: u16) -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
         .proxy(reqwest::Proxy::all(format!("http://127.0.0.1:{port}")).map_err(|e| e.to_string())?)
         .timeout(Duration::from_secs(8))
+        .tcp_nodelay(true)
         .build()
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())
+}
+
+async fn timed_get(client: &reqwest::Client, url: &str) -> Result<u32, String> {
     let t = Instant::now();
     client.get(url).send().await.map_err(|e| e.to_string())?;
     Ok(t.elapsed().as_millis() as u32)
+}
+
+/// Real HTTP round-trip through the running core's local mixed inbound.
+///
+/// The first request pays for everything that happens once per connection: dialing the server, the proxy
+/// handshake and (for HTTPS) TLS. That is 3-4 round trips and is what made Vanish read far higher than other
+/// clients. A second request on the same connection is the round trip a game or a page load actually sees,
+/// so that is the number reported (the first one is the fallback if the connection is not reused).
+pub async fn http_ping(port: u16, url: &str) -> Result<u32, String> {
+    let client = proxied_client(port)?;
+    let cold = timed_get(&client, url).await?;
+    Ok(timed_get(&client, url).await.map_or(cold, |warm| warm.min(cold)))
 }
 
 /// Supervises a running core: detects an unexpected exit (kill switch) and a dead node (auto fallback).
@@ -265,8 +284,13 @@ async fn watchdog(app: AppHandle, generation: u64, node_id: String) {
     let state = app.state::<AppState>();
     let alive = || state.generation.load(Ordering::SeqCst) == generation;
     let mut failures = 0u32;
+    let game = state.settings.lock().unwrap().game_mode;
+    // Game mode keeps one connection open and probes it often: it doubles as a keep-alive for the tunnel and
+    // feeds the live ping / jitter / loss readout, and a dead path is noticed in about ten seconds instead of 24.
+    let mut monitor = GameMonitor::default();
+    let mut game_client: Option<(u16, reqwest::Client)> = None;
     loop {
-        sleep(Duration::from_secs(8)).await;
+        sleep(Duration::from_secs(if game { 2 } else { 8 })).await;
         if !alive() {
             return;
         }
@@ -297,11 +321,27 @@ async fn watchdog(app: AppHandle, generation: u64, node_id: String) {
         }
 
         let port = state.active_ports.lock().unwrap().0;
-        match http_ping(port, &ping_url).await {
-            Ok(_) => failures = 0,
-            Err(_) => failures += 1,
+        if game {
+            if game_client.as_ref().is_none_or(|(p, _)| *p != port) {
+                game_client = proxied_client(port).ok().map(|c| (port, c));
+            }
+            let sample = match &game_client {
+                Some((_, c)) => match timeout(Duration::from_secs(4), timed_get(c, &ping_url)).await {
+                    Ok(Ok(ms)) => Some(ms),
+                    _ => None,
+                },
+                None => None,
+            };
+            failures = if sample.is_some() { 0 } else { failures + 1 };
+            let _ = app.emit("game-stats", monitor.record(sample));
+        } else {
+            match http_ping(port, &ping_url).await {
+                Ok(_) => failures = 0,
+                Err(_) => failures += 1,
+            }
         }
-        if failures >= 3 && fallback {
+        // Three misses in a row: 24 s normally, 6 s in game mode (where fallback is always on).
+        if failures >= 3 && (fallback || game) {
             if let Some(next) = pick_alternative(&app, &node_id).await {
                 state.settings.lock().unwrap().selected_node = Some(next.clone());
                 let _ = state.save_settings();
@@ -314,6 +354,40 @@ async fn watchdog(app: AppHandle, generation: u64, node_id: String) {
             }
             failures = 0;
         }
+    }
+}
+
+#[derive(Serialize, Clone)]
+pub struct GameStats {
+    /// Smoothed round trip in ms (last few samples), None while nothing has answered.
+    pub ping: Option<u32>,
+    /// Mean change between consecutive samples, ms.
+    pub jitter: u32,
+    /// Share of the recent window that got no answer, 0-100.
+    pub loss: u32,
+    /// Raw recent samples for the sparkline; -1 marks a lost probe.
+    pub samples: Vec<i32>,
+}
+
+#[derive(Default)]
+struct GameMonitor {
+    window: std::collections::VecDeque<Option<u32>>,
+}
+
+impl GameMonitor {
+    const WINDOW: usize = 30;
+
+    fn record(&mut self, sample: Option<u32>) -> GameStats {
+        if self.window.len() == Self::WINDOW {
+            self.window.pop_front();
+        }
+        self.window.push_back(sample);
+        let ok: Vec<u32> = self.window.iter().flatten().copied().collect();
+        let recent: Vec<u32> = self.window.iter().rev().take(5).flatten().copied().collect();
+        let ping = (!recent.is_empty()).then(|| recent.iter().sum::<u32>() / recent.len() as u32);
+        let jitter = if ok.len() > 1 { ok.windows(2).map(|w| w[0].abs_diff(w[1])).sum::<u32>() / (ok.len() as u32 - 1) } else { 0 };
+        let loss = (self.window.iter().filter(|s| s.is_none()).count() * 100 / self.window.len()) as u32;
+        GameStats { ping, jitter, loss, samples: self.window.iter().map(|s| s.map_or(-1, |v| v as i32)).collect() }
     }
 }
 
