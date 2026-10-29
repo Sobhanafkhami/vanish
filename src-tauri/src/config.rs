@@ -172,6 +172,30 @@ pub fn build(node: &Node, s: &Settings) -> Value {
     cfg
 }
 
+/// Android only. libbox is one in-process core, so a second "probe" process is impossible. Instead the running
+/// config carries every node as an extra outbound (`p-<id>`) that the Clash API can delay-test, and the core
+/// writes its log to a file the app tails into the Core log view.
+#[cfg(target_os = "android")]
+pub fn android_extras(cfg: &mut Value, data_dir: &std::path::Path, probes: Option<&[Node]>) {
+    cfg["log"]["output"] = json!(data_dir.join("core.log").to_string_lossy());
+    let Some(nodes) = probes else { return };
+    for node in nodes.iter().take(400) {
+        let tag = format!("p-{}", node.id);
+        if node.outbound["type"] == "wireguard" {
+            if let Some(list) = cfg["endpoints"].as_array_mut() {
+                list.push(wireguard_endpoint(&node.outbound, &tag));
+            }
+        } else {
+            let mut ob = node.outbound.clone();
+            ob["tag"] = json!(tag);
+            tune_outbound(&mut ob, false);
+            if let Some(list) = cfg["outbounds"].as_array_mut() {
+                list.push(ob);
+            }
+        }
+    }
+}
+
 /// Headless config for the real-delay probe: every node as its own outbound (`n0`, `n1`, ...) plus the
 /// Clash API, no inbounds. Delay checks are made through that API, one per node.
 pub fn probe(nodes: &[&Node], api_port: u16) -> Value {

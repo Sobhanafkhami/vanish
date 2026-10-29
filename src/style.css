@@ -264,3 +264,33 @@ html[lang="fa"] .hud-label {
 .panel {
   transition: border-color 0.25s ease, box-shadow 0.3s ease, background-color 0.25s ease;
 }
+
+/* ---- touch / phones ------------------------------------------------------------------------------------- */
+html {
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}
+@media (pointer: coarse) {
+  /* thumb-sized targets (>= 44px tall in practice) */
+  .btn {
+    min-height: 2.75rem;
+    padding-inline: 0.875rem;
+  }
+  .menu-item {
+    min-height: 2.75rem;
+  }
+  input,
+  textarea,
+  select {
+    font-size: 16px; /* keeps the keyboard from zooming the page */
+  }
+}
+@media (max-width: 767px) {
+  .text-\[9px\],
+  .text-\[10px\] {
+    font-size: 11px;
+  }
+  .text-xs {
+    font-size: 0.8125rem;
+  }
+}

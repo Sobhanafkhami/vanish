@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { t } from "../lib/i18n";
 import { computed, nextTick, ref } from "vue";
-import { Activity, ArrowDown, ArrowDownUp, ArrowUp, Check, ChevronDown, ClipboardPaste, Pencil, Plus, QrCode, RefreshCw, Search, Timer, Trash2, X, Zap } from "lucide-vue-next";
+import { Activity, ArrowDown, ArrowDownUp, ArrowUp, Check, ChevronDown, ClipboardPaste, EllipsisVertical, Pencil, Plus, QrCode, RefreshCw, Search, Timer, Trash2, X, Zap } from "lucide-vue-next";
+import type { VanishNode } from "../lib/api";
 import SubUsage from "./SubUsage.vue";
 import { fmtBytes, subUsage, usageTone } from "../lib/usage";
 import {
@@ -24,6 +25,8 @@ const subUrl = ref("");
 const importKind = ref<"sub" | "links">("sub");
 const showImport = ref(false);
 const showTest = ref(false);
+// Phones have no hover, so a row's extra actions live in a bottom sheet opened by its ⋯ button.
+const sheetNode = ref<VanishNode | null>(null);
 const message = ref("");
 const query = ref("");
 const sortByPing = ref(false);
@@ -123,22 +126,22 @@ async function deleteSub() {
 
 <template>
   <div class="panel flex min-h-0 flex-1 flex-col p-4">
-    <div class="mb-3 flex items-center justify-between gap-2">
+    <div class="mb-3 flex flex-wrap items-center justify-between gap-x-2 gap-y-2">
       <h2 class="flex items-baseline gap-2 text-sm font-semibold text-white">
         {{ t("Servers") }}
         <span class="font-mono text-xs font-normal text-white/45">{{ visible.length }}</span>
       </h2>
-      <div class="flex items-center gap-2">
-        <button class="btn !border-accent/40 !text-accent-soft" :disabled="store.busy || !store.nodes.length" :title="t('Ping all, then select the quickest')" @click="connectFastest">
+      <div class="grid w-full grid-cols-3 items-stretch gap-2 md:flex md:w-auto md:items-center">
+        <button class="btn justify-center !border-accent/40 !text-accent-soft" :disabled="store.busy || !store.nodes.length" :title="t('Ping all, then select the quickest')" @click="connectFastest">
           <Zap :size="13" /> {{ t("Fastest") }}
         </button>
         <div class="relative">
-          <button class="btn" :aria-expanded="showTest" :disabled="!store.nodes.length" @click="showTest = !showTest">
+          <button class="btn w-full justify-center" :aria-expanded="showTest" :disabled="!store.nodes.length" @click="showTest = !showTest">
             <Timer :size="13" /> {{ store.delayTesting ? t("Testing…") : t("Test") }} <ChevronDown :size="12" class="transition" :class="{ 'rotate-180': showTest }" />
           </button>
           <template v-if="showTest">
             <button class="fixed inset-0 z-10 cursor-default" tabindex="-1" aria-hidden="true" @click="showTest = false"></button>
-            <div class="absolute end-0 top-full z-20 mt-1 w-64 rounded-xl border border-ink-line bg-ink-raised p-1 shadow-xl" role="menu">
+            <div class="absolute end-0 top-full z-20 mt-1 w-64 max-w-[85vw] rounded-xl border border-ink-line bg-ink-raised p-1 shadow-xl" role="menu">
               <button class="menu-item" role="menuitem" :disabled="store.busy" @click="showTest = false; pingAll()">
                 <Activity :size="14" class="mt-0.5 shrink-0 text-accent-soft" />
                 <span><span class="block text-xs text-white/90">{{ t("TCP ping") }}</span><span class="block text-[11px] text-white/45">{{ t("TCP connect time to each server") }}</span></span>
@@ -150,7 +153,7 @@ async function deleteSub() {
             </div>
           </template>
         </div>
-        <button class="btn" :class="{ '!border-accent/50 !text-accent-soft': showImport }" :aria-expanded="showImport" @click="showImport = !showImport">
+        <button class="btn justify-center" :class="{ '!border-accent/50 !text-accent-soft': showImport }" :aria-expanded="showImport" @click="showImport = !showImport">
           <Plus :size="13" /> {{ t("Import") }}
         </button>
       </div>
@@ -204,7 +207,7 @@ async function deleteSub() {
       <button
         role="tab"
         :aria-selected="store.activeTab === 'all'"
-        class="shrink-0 rounded-md px-3 py-1 text-xs transition"
+        class="shrink-0 rounded-md px-3 py-2 text-xs transition md:py-1"
         :class="store.activeTab === 'all' ? 'bg-accent/15 text-accent-soft' : 'text-white/50 hover:text-white/80'"
         @click="store.activeTab = 'all'"
       >
@@ -214,7 +217,7 @@ async function deleteSub() {
         v-if="manualCount"
         role="tab"
         :aria-selected="store.activeTab === 'manual'"
-        class="shrink-0 rounded-md px-3 py-1 text-xs transition"
+        class="shrink-0 rounded-md px-3 py-2 text-xs transition md:py-1"
         :class="store.activeTab === 'manual' ? 'bg-accent/15 text-accent-soft' : 'text-white/50 hover:text-white/80'"
         @click="store.activeTab = 'manual'"
       >
@@ -225,7 +228,7 @@ async function deleteSub() {
         :key="s.id"
         role="tab"
         :aria-selected="store.activeTab === s.id"
-        class="max-w-[10rem] shrink-0 truncate rounded-md px-3 py-1 text-xs transition"
+        class="max-w-[10rem] shrink-0 truncate rounded-md px-3 py-2 text-xs transition md:py-1"
         :class="store.activeTab === s.id ? 'bg-accent/15 text-accent-soft' : 'text-white/50 hover:text-white/80'"
         @click="store.activeTab = s.id"
       >
@@ -252,18 +255,18 @@ async function deleteSub() {
         />
         <div class="flex shrink-0 gap-1 text-white/50">
           <template v-if="renaming">
-            <button class="p-1 hover:text-accent-soft" :aria-label="t('Save name')" @click="commitRename"><Check :size="14" /></button>
-            <button class="p-1 hover:text-white" :aria-label="t('Cancel')" @click="renaming = false"><X :size="14" /></button>
+            <button class="p-2 hover:text-accent-soft md:p-1" :aria-label="t('Save name')" @click="commitRename"><Check :size="14" /></button>
+            <button class="p-2 hover:text-white md:p-1" :aria-label="t('Cancel')" @click="renaming = false"><X :size="14" /></button>
           </template>
           <template v-else>
-            <button class="p-1 hover:text-white" :aria-label="t('Rename subscription')" @click="startRename"><Pencil :size="14" /></button>
-            <button class="p-1 hover:text-white" :aria-label="t('Show subscription QR')" @click="store.ui.qr = { title: activeSub.name, text: activeSub.url }">
+            <button class="p-2 hover:text-white md:p-1" :aria-label="t('Rename subscription')" @click="startRename"><Pencil :size="14" /></button>
+            <button class="p-2 hover:text-white md:p-1" :aria-label="t('Show subscription QR')" @click="store.ui.qr = { title: activeSub.name, text: activeSub.url }">
               <QrCode :size="14" />
             </button>
-            <button class="p-1 hover:text-accent-soft disabled:opacity-40" :disabled="store.busy" :aria-label="t('Refresh subscription')" @click="refreshSubscription(activeSub.id)">
+            <button class="p-2 hover:text-accent-soft disabled:opacity-40 md:p-1" :disabled="store.busy" :aria-label="t('Refresh subscription')" @click="refreshSubscription(activeSub.id)">
               <RefreshCw :size="14" />
             </button>
-            <button class="p-1 hover:text-red-400" :aria-label="t('Remove subscription')" @click="deleteSub"><Trash2 :size="14" /></button>
+            <button class="p-2 hover:text-red-400 md:p-1" :aria-label="t('Remove subscription')" @click="deleteSub"><Trash2 :size="14" /></button>
           </template>
         </div>
       </div>
@@ -275,7 +278,7 @@ async function deleteSub() {
     <div class="mb-3 flex gap-2">
       <label class="flex flex-1 items-center gap-2 rounded-lg border border-ink-line bg-black/30 px-2 text-white/50 focus-within:border-accent/60">
         <Search :size="13" />
-        <input v-model="query" :placeholder="t('Search nodes')" class="w-full bg-transparent py-1.5 text-xs text-white outline-none placeholder:text-white/30" />
+        <input v-model="query" :placeholder="t('Search nodes')" class="w-full bg-transparent py-2.5 text-xs text-white outline-none placeholder:text-white/30 md:py-1.5" />
       </label>
       <button class="btn" :class="{ '!border-accent/50 !text-accent-soft': sortByPing }" :aria-pressed="sortByPing" @click="sortByPing = !sortByPing">
         <ArrowDownUp :size="13" /> {{ t("Ping") }}
@@ -296,7 +299,7 @@ async function deleteSub() {
         v-for="(n, i) in visible"
         :key="n.id"
         :style="{ '--i': Math.min(i, 12) }"
-        class="group flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-2 transition"
+        class="group flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-3 transition md:py-2"
         :class="store.settings?.selected_node === n.id ? 'border-accent/50 bg-accent/10' : 'border-transparent bg-white/[0.03] hover:bg-white/[0.06]'"
         @click="selectNode(n.id)"
       >
@@ -311,7 +314,7 @@ async function deleteSub() {
             </span>
           </div>
         </div>
-        <div class="w-24 shrink-0 whitespace-nowrap text-end font-mono leading-tight" :title="n.delay !== null && n.delay > 0 ? t('Real HTTP delay through this server') : t('TCP connect time')">
+        <div class="w-20 shrink-0 whitespace-nowrap text-end font-mono leading-tight md:w-24" :title="n.delay !== null && n.delay > 0 ? t('Real HTTP delay through this server') : t('TCP connect time')">
           <template v-if="n.delay !== null">
             <div class="text-sm" :class="latencyClass(n.delay < 0 ? 99999 : n.delay, 400, 800)">{{ delayText(n.delay) }}</div>
           </template>
@@ -321,19 +324,43 @@ async function deleteSub() {
           </template>
           <div v-else class="text-sm text-white/25">{{ store.delayTesting ? "…" : "—" }}</div>
         </div>
+        <button class="-me-1 grid h-10 w-9 shrink-0 place-items-center rounded-lg text-white/50 active:bg-white/10 md:hidden" :aria-label="t('More')" @click.stop="sheetNode = n">
+          <EllipsisVertical :size="18" />
+        </button>
         <button
           v-if="n.link"
-          class="text-white/30 opacity-0 transition hover:text-white focus-visible:opacity-100 group-hover:opacity-100"
+          class="hidden text-white/30 opacity-0 transition hover:text-white focus-visible:opacity-100 group-hover:opacity-100 md:block"
           :aria-label="t('Show QR code')"
           @click.stop="store.ui.qr = { title: n.name, text: n.link }"
         >
           <QrCode :size="14" />
         </button>
-        <button class="text-white/30 opacity-0 transition hover:text-red-400 focus-visible:opacity-100 group-hover:opacity-100" :aria-label="t('Remove node')" @click.stop="removeNode(n.id)">
+        <button class="hidden text-white/30 opacity-0 transition hover:text-red-400 focus-visible:opacity-100 group-hover:opacity-100 md:block" :aria-label="t('Remove node')" @click.stop="removeNode(n.id)">
           <Trash2 :size="14" />
         </button>
       </div>
       </TransitionGroup>
     </div>
+
+    <Teleport to="body">
+      <Transition name="fade">
+        <div v-if="sheetNode" class="fixed inset-0 z-50 flex items-end bg-black/60 md:hidden" @click.self="sheetNode = null">
+          <div class="w-full rounded-t-2xl border-t border-ink-line bg-ink-raised p-3" :style="{ paddingBottom: 'calc(0.75rem + env(safe-area-inset-bottom))' }" role="dialog">
+            <div class="truncate px-3 pb-2 text-sm font-medium text-white">{{ sheetNode.name }}</div>
+            <button
+              v-if="sheetNode.link"
+              class="menu-item items-center !py-3"
+              @click="store.ui.qr = { title: sheetNode.name, text: sheetNode.link }; sheetNode = null"
+            >
+              <QrCode :size="18" class="text-accent-soft" /> <span class="text-sm text-white/90">{{ t("Show QR code") }}</span>
+            </button>
+            <button class="menu-item items-center !py-3" @click="removeNode(sheetNode.id); sheetNode = null">
+              <Trash2 :size="18" class="text-red-400" /> <span class="text-sm text-red-300">{{ t("Remove node") }}</span>
+            </button>
+            <button class="menu-item items-center justify-center !py-3" @click="sheetNode = null"><span class="text-sm text-white/60">{{ t("Cancel") }}</span></button>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
   </div>
 </template>

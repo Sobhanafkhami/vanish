@@ -35,12 +35,55 @@ impl Drop for Guard {
 pub async fn real_delay(app: &AppHandle, ids: Vec<String>) -> Result<(), String> {
     // The probe starts its own sing-box process, which Android does not allow; libbox is a single in-process core.
     #[cfg(target_os = "android")]
-    {
-        let _ = (app, ids);
-        return Err("real delay test is not available on Android yet".into());
-    }
+    return real_delay_android(app, ids).await;
     #[cfg(not(target_os = "android"))]
     real_delay_desktop(app, ids).await
+}
+
+/// Android: asks the running core (which carries every node as `p-<id>`, see `config::android_extras`) to time each one.
+#[cfg(target_os = "android")]
+async fn real_delay_android(app: &AppHandle, ids: Vec<String>) -> Result<(), String> {
+    if RUNNING.swap(true, Ordering::SeqCst) {
+        return Err("a delay test is already running".into());
+    }
+    let _guard = Guard;
+    let state = app.state::<AppState>();
+    if state.active_node.lock().unwrap().is_none() {
+        return Err("connect first to run the real delay test".into());
+    }
+    let (api_port, test_url) = (state.active_ports.lock().unwrap().1, state.settings.lock().unwrap().ping_url.clone());
+    let client = reqwest::Client::builder().no_proxy().build().map_err(|e| e.to_string())?;
+    let gate = Arc::new(Semaphore::new(6));
+    let handles: Vec<_> = ids
+        .into_iter()
+        .map(|id| {
+            let (client, gate, app, url) = (client.clone(), gate.clone(), app.clone(), test_url.clone());
+            tauri::async_runtime::spawn(async move {
+                let _permit = gate.acquire().await;
+                let delay = match client
+                    .get(format!("http://127.0.0.1:{api_port}/proxies/p-{id}/delay"))
+                    .query(&[("url", url.as_str()), ("timeout", "6000")])
+                    .timeout(Duration::from_secs(9))
+                    .send()
+                    .await
+                {
+                    Ok(r) if r.status().is_success() => {
+                        r.json::<serde_json::Value>().await.ok().and_then(|v| v["delay"].as_i64()).map_or(-1, |d| d as i32)
+                    }
+                    _ => -1,
+                };
+                let state = app.state::<AppState>();
+                if let Some(n) = state.nodes.lock().unwrap().iter_mut().find(|n| n.id == id) {
+                    n.delay = Some(delay);
+                }
+                let _ = app.emit("node-delay", DelayEvent { id, delay });
+            })
+        })
+        .collect();
+    for h in handles {
+        let _ = h.await;
+    }
+    state.save_nodes()
 }
 
 #[cfg(not(target_os = "android"))]

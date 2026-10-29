@@ -101,11 +101,33 @@ pub async fn start(app: &AppHandle) -> Result<CoreStatus, String> {
     };
 
     let cfg_path = state.data_dir.join("config.json");
-    let cfg = serde_json::to_vec_pretty(&config::build(&node, &settings)).map_err(|e| e.to_string())?;
-    std::fs::write(&cfg_path, cfg).map_err(|e| e.to_string())?;
+    #[cfg(not(target_os = "android"))]
+    {
+        let cfg = serde_json::to_vec_pretty(&config::build(&node, &settings)).map_err(|e| e.to_string())?;
+        std::fs::write(&cfg_path, cfg).map_err(|e| e.to_string())?;
+    }
 
     #[cfg(target_os = "android")]
-    start_android(app, &cfg_path, &settings).await?;
+    {
+        // Every node rides along as a delay-test outbound. If one of them is invalid the core refuses to start,
+        // so a failed start is retried once with just the selected node.
+        let all_nodes = state.nodes.lock().unwrap().clone();
+        let write = |probes: Option<&[crate::nodes::Node]>| -> Result<(), String> {
+            let mut cfg = config::build(&node, &settings);
+            config::android_extras(&mut cfg, &state.data_dir, probes);
+            std::fs::write(&cfg_path, serde_json::to_vec_pretty(&cfg).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
+        };
+        let _ = std::fs::remove_file(state.data_dir.join("core.log"));
+        write(Some(&all_nodes))?;
+        if let Err(e) = start_android(app, &cfg_path, &settings).await {
+            if !e.starts_with("core exited") {
+                return Err(e);
+            }
+            sleep(Duration::from_millis(900)).await;
+            write(None)?;
+            start_android(app, &cfg_path, &settings).await?;
+        }
+    }
 
     #[cfg(not(target_os = "android"))]
     {
@@ -183,6 +205,8 @@ pub async fn start(app: &AppHandle) -> Result<CoreStatus, String> {
 
     let generation = state.generation.fetch_add(1, Ordering::SeqCst) + 1;
     tauri::async_runtime::spawn(watchdog(app.clone(), generation, node.id.clone()));
+    #[cfg(target_os = "android")]
+    tauri::async_runtime::spawn(tail_core_log(app.clone(), generation, state.data_dir.join("core.log")));
     let task = tauri::async_runtime::spawn(traffic_loop(app.clone(), settings.api_port));
     if let Some(old) = state.traffic_task.lock().unwrap().replace(task) {
         old.abort();
@@ -232,6 +256,31 @@ async fn start_android(app: &AppHandle, cfg_path: &std::path::Path, settings: &c
     }
     let _ = crate::vpn::stop(app).await;
     Err("core did not become ready in time".into())
+}
+
+/// Android: forwards the lines libbox appends to its log file to the Core log view, until the connection ends.
+#[cfg(target_os = "android")]
+async fn tail_core_log(app: AppHandle, generation: u64, path: std::path::PathBuf) {
+    use std::io::{Read, Seek, SeekFrom};
+    let state = app.state::<AppState>();
+    let mut offset = 0u64;
+    let mut partial = String::new();
+    while state.generation.load(Ordering::SeqCst) == generation {
+        if let Ok(mut f) = std::fs::File::open(&path) {
+            if f.seek(SeekFrom::Start(offset)).is_ok() {
+                let mut buf = Vec::new();
+                if f.read_to_end(&mut buf).is_ok() && !buf.is_empty() {
+                    offset += buf.len() as u64;
+                    partial.push_str(&String::from_utf8_lossy(&buf));
+                    while let Some(i) = partial.find('\n') {
+                        let line: String = partial.drain(..=i).collect();
+                        let _ = app.emit("core-log", line.trim_end());
+                    }
+                }
+            }
+        }
+        sleep(Duration::from_millis(700)).await;
+    }
 }
 
 async fn traffic_loop(app: AppHandle, api_port: u16) {

@@ -14,6 +14,7 @@ import android.system.OsConstants
 import io.nekohasekai.libbox.BridgeOptions
 import io.nekohasekai.libbox.BridgeSession
 import io.nekohasekai.libbox.ConnectionOwner
+import io.nekohasekai.libbox.ExchangeContext
 import io.nekohasekai.libbox.InterfaceUpdateListener
 import io.nekohasekai.libbox.Libbox
 import io.nekohasekai.libbox.LocalDNSTransport
@@ -27,17 +28,21 @@ import io.nekohasekai.libbox.ShellSession
 import io.nekohasekai.libbox.StringIterator
 import io.nekohasekai.libbox.TunOptions
 import io.nekohasekai.libbox.WIFIState
+import java.net.Inet4Address
+import java.net.Inet6Address
 import java.net.InetSocketAddress
+import java.net.UnknownHostException
 import java.net.NetworkInterface as JavaNetworkInterface
 
 /** Tells libbox how to talk to Android: open the TUN, protect sockets, report the underlying network. */
 class VanishPlatform(private val service: VanishVpnService) : PlatformInterface {
     private val connectivity = service.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
     private var callback: ConnectivityManager.NetworkCallback? = null
+    @Volatile private var underlying: Network? = null
 
     // ---- network plumbing ----------------------------------------------------------------------
 
-    override fun localDNSTransport(): LocalDNSTransport? = null
+    override fun localDNSTransport(): LocalDNSTransport = LocalResolver()
 
     override fun usePlatformAutoDetectInterfaceControl(): Boolean = true
 
@@ -82,6 +87,7 @@ class VanishPlatform(private val service: VanishVpnService) : PlatformInterface 
             override fun onAvailable(network: Network) = publish(network, listener)
             override fun onLinkPropertiesChanged(network: Network, linkProperties: LinkProperties) = publish(network, listener)
             override fun onLost(network: Network) {
+                if (underlying == network) underlying = null
                 service.setUnderlyingNetworks(null)
                 listener.updateDefaultInterface("", -1, false, false)
             }
@@ -104,6 +110,7 @@ class VanishPlatform(private val service: VanishVpnService) : PlatformInterface 
         val name = connectivity.getLinkProperties(network)?.interfaceName ?: return
         val index = runCatching { JavaNetworkInterface.getByName(name)?.index }.getOrNull() ?: return
         val metered = connectivity.getNetworkCapabilities(network)?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) == false
+        underlying = network
         service.setUnderlyingNetworks(arrayOf(network))
         listener.updateDefaultInterface(name, index, metered, false)
     }
@@ -143,6 +150,39 @@ class VanishPlatform(private val service: VanishVpnService) : PlatformInterface 
             }
         }
         return InterfaceArray(result)
+    }
+
+    /**
+     * Resolves the proxy server's own hostname. Go has no resolv.conf on Android, so without this the core cannot
+     * look up its server; the lookup must also bypass the VPN, which the underlying network does by itself.
+     */
+    private inner class LocalResolver : LocalDNSTransport {
+        override fun raw(): Boolean = false
+
+        override fun lookup(ctx: ExchangeContext, network: String, domain: String) {
+            val net = underlying ?: connectivity.allNetworks.firstOrNull { n ->
+                connectivity.getNetworkCapabilities(n)?.let {
+                    it.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) && !it.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+                } == true
+            }
+            try {
+                val all = if (net != null) net.getAllByName(domain) else java.net.InetAddress.getAllByName(domain)
+                val wanted = all.filter {
+                    when (network) {
+                        "ip4" -> it is Inet4Address
+                        "ip6" -> it is Inet6Address
+                        else -> true
+                    }
+                }.mapNotNull { it.hostAddress?.substringBefore('%') }
+                if (wanted.isEmpty()) ctx.errorCode(0) else ctx.success(wanted.joinToString("\n"))
+            } catch (e: UnknownHostException) {
+                ctx.errorCode(3) // NXDOMAIN
+            }
+        }
+
+        override fun exchange(ctx: ExchangeContext, message: ByteArray) {
+            throw Exception("raw DNS is not used on Android")
+        }
     }
 
     // ---- not applicable on Android -------------------------------------------------------------

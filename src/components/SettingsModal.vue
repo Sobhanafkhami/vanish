@@ -6,6 +6,7 @@ import Modal from "./Modal.vue";
 import Toggle from "./Toggle.vue";
 import { addDirectApp, checkForUpdate, installUpdate, resetSettings, store, updateSettings } from "../stores/app";
 import type { Settings } from "../lib/api";
+import { isMobile } from "../lib/platform";
 
 type BoolKey = "autostart" | "connect_on_launch" | "auto_fallback" | "kill_switch";
 
@@ -15,6 +16,9 @@ const toggles: { key: BoolKey; label: string; hint: string }[] = [
   { key: "auto_fallback", label: "Auto fallback", hint: "Switches to the next-fastest node when the current one stops responding." },
   { key: "kill_switch", label: "Kill switch", hint: "System Proxy mode: if the core dies, traffic is blocked instead of leaking." },
 ];
+
+// Start-with-Windows and the system-proxy kill switch do not exist on Android.
+const shownToggles = toggles.filter((x) => !(isMobile && (x.key === "autostart" || x.key === "kill_switch")));
 
 const routes: { id: Settings["route_mode"]; label: string; hint: string }[] = [
   { id: "global", label: "Global", hint: "Everything through the proxy." },
@@ -89,7 +93,7 @@ async function onCheck() {
           </button>
         </div>
       </div>
-      <div v-for="tg in toggles" :key="tg.key" class="flex items-start justify-between gap-4">
+      <div v-for="tg in shownToggles" :key="tg.key" class="flex items-start justify-between gap-4">
         <span>
           <span class="block text-sm text-white/90">{{ t(tg.label) }}</span>
           <span class="block text-xs text-white/50">{{ t(tg.hint) }}</span>
@@ -207,7 +211,7 @@ async function onCheck() {
           <button v-if="store.update" class="btn !border-accent/50 !text-accent-soft" :disabled="store.updating" @click="installUpdate">
             {{ store.updating ? t("Updating…") : t("Install {v}", { v: store.update.version }) }}
           </button>
-          <button class="btn" :disabled="checking" @click="onCheck">{{ checking ? "Checking…" : "Check for updates" }}</button>
+          <button v-if="!isMobile" class="btn" :disabled="checking" @click="onCheck">{{ checking ? "Checking…" : "Check for updates" }}</button>
         </div>
       </div>
       <p v-if="updateStatus" class="text-xs text-white/55" role="status">{{ updateStatus }}</p>

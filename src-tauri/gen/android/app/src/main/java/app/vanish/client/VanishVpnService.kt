@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.net.VpnService
 import android.os.Build
+import android.os.ParcelFileDescriptor
 import android.util.Log
 import androidx.core.app.ServiceCompat
 import io.nekohasekai.libbox.CommandServer
@@ -39,6 +40,8 @@ class VanishVpnService : VpnService(), CommandServerHandler {
 
     private var server: CommandServer? = null
     private var configPath: String? = null
+    // libbox dup()s the descriptor it is given and never closes ours, so we own it and must close it on stop.
+    private var tunPfd: ParcelFileDescriptor? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
@@ -120,6 +123,10 @@ class VanishVpnService : VpnService(), CommandServerHandler {
         runCatching { server?.closeService() }
         runCatching { server?.close() }
         server = null
+        runCatching { tunPfd?.close() }
+        tunPfd = null
+        runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
+        runCatching { (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).cancel(NOTIFICATION_ID) }
     }
 
     /** Builds the system VPN interface from what the core asked for and hands its file descriptor over. */
@@ -159,7 +166,9 @@ class VanishVpnService : VpnService(), CommandServerHandler {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) builder.setMetered(false)
 
         val pfd = builder.establish() ?: throw Exception("android: the VPN permission was revoked")
-        return pfd.detachFd()
+        runCatching { tunPfd?.close() }
+        tunPfd = pfd
+        return pfd.fd
     }
 
     override fun onRevoke() {
