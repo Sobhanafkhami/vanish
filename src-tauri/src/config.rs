@@ -79,8 +79,12 @@ pub fn build(node: &Node, s: &Settings) -> Value {
         "listen": "127.0.0.1",
         "listen_port": s.mixed_port,
     })];
+    // Game mode with a list of games behaves like a route optimizer: only those programs use the tunnel,
+    // everything else keeps its own, shorter path.
+    let game_apps: Vec<&String> = if game { s.game_apps.iter().filter(|a| !a.trim().is_empty()).collect() } else { vec![] };
     if s.mode == Mode::Tun {
-        inbounds.push(json!({
+        #[allow(unused_mut)]
+        let mut tun = json!({
             "type": "tun",
             "tag": "tun-in",
             "address": ["172.19.0.1/30", "fdfe:dcba:9876::1/126"],
@@ -89,7 +93,13 @@ pub fn build(node: &Node, s: &Settings) -> Value {
             "stack": "mixed",
             // Full-cone NAT: peers can reach the player directly, which online games rely on.
             "endpoint_independent_nat": game,
-        }));
+        });
+        // Android decides per app before packets ever reach the core, which is cheaper than a process rule.
+        #[cfg(target_os = "android")]
+        if !game_apps.is_empty() {
+            tun["include_package"] = json!(game_apps);
+        }
+        inbounds.push(tun);
     }
 
     // Routing: private nets always direct, then user-defined bypasses, then the route mode.
@@ -112,7 +122,9 @@ pub fn build(node: &Node, s: &Settings) -> Value {
     rules.push(json!({ "ip_is_private": true, "outbound": "direct" }));
     let apps: Vec<&String> = s.direct_apps.iter().filter(|a| !a.trim().is_empty()).collect();
     if !apps.is_empty() {
-        rules.push(json!({ "process_name": apps, "outbound": "direct" }));
+        // Android matches on the package id (com.example.app), desktop on the process name (app.exe).
+        let key = if cfg!(target_os = "android") { "package_name" } else { "process_name" };
+        rules.push(json!({ key: apps, "outbound": "direct" }));
     }
     let mut dns_rules: Vec<Value> = vec![];
     if !direct_suffixes.is_empty() {
@@ -120,14 +132,13 @@ pub fn build(node: &Node, s: &Settings) -> Value {
         // Resolve bypassed domains locally so they do not leak to / depend on the remote resolver.
         dns_rules.push(json!({ "domain_suffix": direct_suffixes, "action": "route", "server": "local" }));
     }
-    // Game mode with a list of games behaves like a route optimizer: only those programs use the tunnel,
-    // everything else keeps its own, shorter path.
-    let game_apps: Vec<&String> = if game { s.game_apps.iter().filter(|a| !a.trim().is_empty()).collect() } else { vec![] };
+    #[cfg(not(target_os = "android"))]
     if !game_apps.is_empty() {
         rules.push(json!({ "process_name": game_apps, "outbound": "proxy" }));
     }
     let direct_all = s.route_mode == RouteMode::Direct;
-    let route_final_direct = direct_all || !game_apps.is_empty();
+    // On Android the tun inbound only carries the listed games, so the final route stays the proxy.
+    let route_final_direct = direct_all || (!cfg!(target_os = "android") && !game_apps.is_empty());
     let dns_server = if s.dns_server.trim().is_empty() { "1.1.1.1" } else { s.dns_server.trim() };
 
     let mut cfg = json!({

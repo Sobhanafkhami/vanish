@@ -8,11 +8,16 @@ mod probe;
 mod proxy;
 mod state;
 mod subs;
+#[cfg(desktop)]
 mod tray;
 mod updater;
 mod usage;
+#[cfg(target_os = "android")]
+mod vpn;
 
-use tauri::{Manager, WindowEvent};
+use tauri::Manager;
+#[cfg(desktop)]
+use tauri::WindowEvent;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -21,21 +26,33 @@ pub fn run() {
     // the data files and the sing-box ports. Focus the running one instead.
     // Dev builds are exempt (and use their own data folder, see setup) so `tauri dev` can run
     // next to an installed Vanish.
-    #[cfg(not(debug_assertions))]
+    #[cfg(all(desktop, not(debug_assertions)))]
     let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| tray::show_main(app)));
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    let builder = builder.plugin(tauri_plugin_dialog::init());
+    #[cfg(target_os = "android")]
+    let builder = builder.plugin(vpn::init());
+    // Closing the window minimizes to tray; use the tray menu to quit.
+    #[cfg(desktop)]
+    let builder = builder.on_window_event(|window, event| {
+        if let WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            let _ = window.hide();
+        }
+    });
     builder
-        .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             #[allow(unused_mut)]
             let mut dir = app.path().app_data_dir()?;
             // Separate nodes/settings so the dev copy cannot overwrite the installed app's files.
-            #[cfg(debug_assertions)]
+            #[cfg(all(desktop, debug_assertions))]
             {
                 dir.set_file_name(format!("{}.dev", dir.file_name().and_then(|n| n.to_str()).unwrap_or("app.vanish.client")));
             }
             std::fs::create_dir_all(dir.join("bin"))?;
             app.manage(state::AppState::load(dir));
+            #[cfg(desktop)]
             tray::init(app.handle())?;
 
             // Launched by the OS at login: stay in the tray.
@@ -73,13 +90,6 @@ pub fn run() {
                 });
             }
             Ok(())
-        })
-        // Closing the window minimizes to tray; use the tray menu to quit.
-        .on_window_event(|window, event| {
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.hide();
-            }
         })
         .invoke_handler(tauri::generate_handler![
             commands::list_nodes,

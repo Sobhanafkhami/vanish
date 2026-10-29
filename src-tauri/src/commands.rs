@@ -301,7 +301,12 @@ pub struct RunningApp {
 
 /// Programs that currently have a window (so the list is apps, not hundreds of services).
 #[tauri::command]
-pub async fn list_running_apps() -> Result<Vec<RunningApp>, String> {
+pub async fn list_running_apps(#[allow(unused_variables)] app: AppHandle) -> Result<Vec<RunningApp>, String> {
+    #[cfg(target_os = "android")]
+    {
+        let apps = crate::vpn::list_apps(&app).await?;
+        return Ok(apps.into_iter().map(|a| RunningApp { name: a.name, title: a.title }).collect());
+    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -328,7 +333,7 @@ pub async fn list_running_apps() -> Result<Vec<RunningApp>, String> {
         apps.sort_by_key(|a| a.name.to_ascii_lowercase());
         Ok(apps)
     }
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "android")))]
     Err("listing running apps is only implemented for Windows".into())
 }
 

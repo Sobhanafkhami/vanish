@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { t } from "./lib/i18n";
 import { computed, onMounted, ref } from "vue";
-import { ChevronDown, ChevronRight, Download, Globe, Rocket, RefreshCw, ShieldAlert, TriangleAlert, X } from "lucide-vue-next";
+import { ChevronDown, Home, List, ChevronRight, Download, Globe, Rocket, RefreshCw, ShieldAlert, TriangleAlert, X } from "lucide-vue-next";
 import TitleBar from "./components/TitleBar.vue";
 import ConnectButton from "./components/ConnectButton.vue";
 import TrafficMonitor from "./components/TrafficMonitor.vue";
 import GameMode from "./components/GameMode.vue";
+import { isMobile } from "./lib/platform";
 import NodeList from "./components/NodeList.vue";
 import SettingsModal from "./components/SettingsModal.vue";
 import LogsModal from "./components/LogsModal.vue";
@@ -33,6 +34,8 @@ const hints = [
 const hintKey = computed(() => (gameOn.value ? "game" : store.status.running ? "running" : (activeMode.value ?? "system_proxy")));
 const modeLocked = computed(() => store.status.running || gameOn.value);
 
+// Phones show one column at a time (bottom tabs); desktop shows both side by side.
+const view = ref<"home" | "servers">("home");
 const showDetails = ref(false);
 const showRaw = ref(false);
 
@@ -71,13 +74,14 @@ function dismissError() {
       </div>
     </Transition>
 
-    <main class="relative grid min-h-0 flex-1 grid-cols-[320px_1fr] gap-4 p-4">
+    <main class="relative grid min-h-0 flex-1 grid-cols-1 gap-4 p-4 md:grid-cols-[320px_1fr]">
       <!-- left: the connection itself -->
-      <section class="-me-2 flex min-h-0 flex-col gap-3 overflow-y-auto pe-2">
+      <section class="-me-2 min-h-0 flex-col gap-3 overflow-y-auto pe-2 md:flex" :class="view === 'home' ? 'flex' : 'hidden'">
         <div class="panel rise flex shrink-0 flex-col items-center gap-4 px-4 py-5" :class="{ active: store.status.running }" style="--d: 0ms">
           <ConnectButton />
 
-          <div class="w-full">
+          <!-- Android has one way in (the VPN service), so there is no mode to pick there -->
+          <div v-if="!isMobile" class="w-full">
             <div class="grid grid-cols-[1.5fr_1fr_1fr] gap-1 rounded-lg border border-ink-line bg-black/40 p-1" role="radiogroup" :aria-label="t('Mode')">
               <button
                 v-for="m in modes"
@@ -165,13 +169,29 @@ function dismissError() {
       </section>
 
       <!-- right: servers -->
-      <section class="rise flex min-h-0 flex-col" style="--d: 120ms">
+      <section class="rise min-h-0 flex-col md:flex" :class="view === 'servers' ? 'flex' : 'hidden'" style="--d: 120ms">
         <NodeList />
       </section>
     </main>
 
+    <!-- bottom navigation, phones only -->
+    <nav class="flex shrink-0 border-t border-ink-line bg-black/50 md:hidden" :style="{ paddingBottom: 'env(safe-area-inset-bottom)' }" role="tablist">
+      <button
+        v-for="tab in ([{ id: 'home', label: 'Connection', icon: Home }, { id: 'servers', label: 'Servers', icon: List }] as const)"
+        :key="tab.id"
+        role="tab"
+        :aria-selected="view === tab.id"
+        class="flex min-h-[3.25rem] flex-1 flex-col items-center justify-center gap-0.5 text-xs transition"
+        :class="view === tab.id ? 'text-accent-soft' : 'text-white/50'"
+        @click="view = tab.id"
+      >
+        <component :is="tab.icon" :size="20" />
+        {{ t(tab.label) }}
+      </button>
+    </nav>
+
     <!-- messages float over the content so they never push the layout around -->
-    <div class="pointer-events-none absolute inset-x-4 bottom-4 z-30 flex flex-col items-end gap-2">
+    <div class="pointer-events-none absolute inset-x-4 bottom-20 z-30 md:bottom-4 flex flex-col items-end gap-2">
       <Transition name="fade">
         <div v-if="store.status.blocked" class="pointer-events-auto flex w-full max-w-md items-start gap-2 rounded-xl border border-red-500/40 bg-ink-raised p-3 text-xs text-red-300 shadow-lg" role="alert">
           <ShieldAlert :size="16" class="mt-0.5 shrink-0" />

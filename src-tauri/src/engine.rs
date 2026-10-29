@@ -75,14 +75,15 @@ fn emit_state(app: &AppHandle) {
 pub async fn start(app: &AppHandle) -> Result<CoreStatus, String> {
     let state = app.state::<AppState>();
     let mut child_slot = state.child.lock().await;
-    if child_slot.is_some() {
+    if child_slot.is_some() || state.active_node.lock().unwrap().is_some() {
         return Err("core is already running".into());
     }
 
     let mut settings = state.settings.lock().unwrap().clone();
     // Other proxy apps (Nekoray, v2rayN...) like 2080/7890/9090: fall back to a free port instead of failing.
-    if settings.game_mode {
-        // Games talk UDP and do not follow system proxy settings, so only TUN can carry them.
+    if settings.game_mode || cfg!(target_os = "android") {
+        // Games talk UDP and do not follow system proxy settings, so only TUN can carry them. On Android the
+        // VPN service is the only way in, which is the same thing.
         settings.mode = Mode::Tun;
     }
     settings.mixed_port = free_port(settings.mixed_port, None);
@@ -103,74 +104,80 @@ pub async fn start(app: &AppHandle) -> Result<CoreStatus, String> {
     let cfg = serde_json::to_vec_pretty(&config::build(&node, &settings)).map_err(|e| e.to_string())?;
     std::fs::write(&cfg_path, cfg).map_err(|e| e.to_string())?;
 
-    let bin = resolve_binary(app, &state);
-    let mut cmd = Command::new(&bin);
-    cmd.args(["run", "-c"])
-        .arg(&cfg_path)
-        .arg("-D")
-        .arg(&state.data_dir)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
-    #[cfg(windows)]
-    cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    #[cfg(target_os = "android")]
+    start_android(app, &cfg_path, &settings).await?;
 
-    let mut child = cmd.spawn().map_err(|e| {
-        format!("cannot start {} ({e}). Put sing-box in {} or set core_path.", bin.display(), state.data_dir.join("bin").display())
-    })?;
-
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-    for pipe in [
-        child.stdout.take().map(|s| Box::new(s) as Box<dyn tokio::io::AsyncRead + Unpin + Send>),
-        child.stderr.take().map(|s| Box::new(s) as Box<dyn tokio::io::AsyncRead + Unpin + Send>),
-    ]
-    .into_iter()
-    .flatten()
+    #[cfg(not(target_os = "android"))]
     {
-        let tx = tx.clone();
-        let app = app.clone();
-        tauri::async_runtime::spawn(async move {
-            let mut lines = BufReader::new(pipe).lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                let _ = app.emit("core-log", &line);
-                let _ = tx.send(line);
+        let bin = resolve_binary(app, &state);
+        let mut cmd = Command::new(&bin);
+        cmd.args(["run", "-c"])
+            .arg(&cfg_path)
+            .arg("-D")
+            .arg(&state.data_dir)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        #[cfg(windows)]
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+
+        let mut child = cmd.spawn().map_err(|e| {
+            format!("cannot start {} ({e}). Put sing-box in {} or set core_path.", bin.display(), state.data_dir.join("bin").display())
+        })?;
+
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        for pipe in [
+            child.stdout.take().map(|s| Box::new(s) as Box<dyn tokio::io::AsyncRead + Unpin + Send>),
+            child.stderr.take().map(|s| Box::new(s) as Box<dyn tokio::io::AsyncRead + Unpin + Send>),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            let tx = tx.clone();
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                let mut lines = BufReader::new(pipe).lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    let _ = app.emit("core-log", &line);
+                    let _ = tx.send(line);
+                }
+            });
+        }
+        drop(tx);
+
+        // Wait until the Clash API answers, or the process dies.
+        let api = format!("http://127.0.0.1:{}/version", settings.api_port);
+        let client = reqwest::Client::builder().no_proxy().build().unwrap_or_default();
+        let mut ready = false;
+        let mut last_lines: Vec<String> = vec![];
+        for _ in 0..40 {
+            while let Ok(l) = rx.try_recv() {
+                last_lines.push(l);
             }
-        });
-    }
-    drop(tx);
-
-    // Wait until the Clash API answers, or the process dies.
-    let api = format!("http://127.0.0.1:{}/version", settings.api_port);
-    let client = reqwest::Client::builder().no_proxy().build().unwrap_or_default();
-    let mut ready = false;
-    let mut last_lines: Vec<String> = vec![];
-    for _ in 0..40 {
-        while let Ok(l) = rx.try_recv() {
-            last_lines.push(l);
+            if let Ok(Some(code)) = child.try_wait() {
+                let tail = last_lines.iter().rev().take(4).rev().cloned().collect::<Vec<_>>().join("\n");
+                return Err(format!("core exited ({code}):\n{tail}"));
+            }
+            if client.get(&api).timeout(Duration::from_millis(300)).send().await.is_ok() {
+                ready = true;
+                break;
+            }
+            sleep(Duration::from_millis(150)).await;
         }
-        if let Ok(Some(code)) = child.try_wait() {
-            let tail = last_lines.iter().rev().take(4).rev().cloned().collect::<Vec<_>>().join("\n");
-            return Err(format!("core exited ({code}):\n{tail}"));
-        }
-        if client.get(&api).timeout(Duration::from_millis(300)).send().await.is_ok() {
-            ready = true;
-            break;
-        }
-        sleep(Duration::from_millis(150)).await;
-    }
-    if !ready {
-        let _ = child.kill().await;
-        return Err("core did not become ready in time".into());
-    }
-
-    if settings.mode == Mode::SystemProxy {
-        if let Err(e) = proxy::set(&format!("127.0.0.1:{}", settings.mixed_port)) {
+        if !ready {
             let _ = child.kill().await;
-            return Err(format!("failed to set system proxy: {e}"));
+            return Err("core did not become ready in time".into());
         }
-    }
 
-    *child_slot = Some(child);
+        if settings.mode == Mode::SystemProxy {
+            if let Err(e) = proxy::set(&format!("127.0.0.1:{}", settings.mixed_port)) {
+                let _ = child.kill().await;
+                return Err(format!("failed to set system proxy: {e}"));
+            }
+        }
+
+        *child_slot = Some(child);
+    }
     *state.active_node.lock().unwrap() = Some(node.id.clone());
     drop(child_slot);
 
@@ -192,6 +199,8 @@ pub async fn stop(app: &AppHandle) -> Result<CoreStatus, String> {
         t.abort();
     }
     let _ = proxy::clear(); // always restore, even if we were not the ones to set it
+    #[cfg(target_os = "android")]
+    let _ = crate::vpn::stop(app).await;
     if let Some(mut child) = state.child.lock().await.take() {
         let _ = child.kill().await;
     }
@@ -199,6 +208,30 @@ pub async fn stop(app: &AppHandle) -> Result<CoreStatus, String> {
     let _ = state.save_nodes(); // persist the usage counters
     emit_state(app);
     Ok(status(app))
+}
+
+/// Starts the VPN service (libbox) and waits for its Clash API, like the desktop path does for the child process.
+#[cfg(target_os = "android")]
+async fn start_android(app: &AppHandle, cfg_path: &std::path::Path, settings: &crate::state::Settings) -> Result<(), String> {
+    if !crate::vpn::prepare(app).await? {
+        return Err("vpn permission denied".into());
+    }
+    crate::vpn::start(app, cfg_path).await?;
+
+    let api = format!("http://127.0.0.1:{}/version", settings.api_port);
+    let client = reqwest::Client::builder().no_proxy().build().unwrap_or_default();
+    for _ in 0..100 {
+        if client.get(&api).timeout(Duration::from_millis(300)).send().await.is_ok() {
+            return Ok(());
+        }
+        if let Some(err) = crate::vpn::status(app).await?.error {
+            let _ = crate::vpn::stop(app).await;
+            return Err(format!("core exited:\n{err}"));
+        }
+        sleep(Duration::from_millis(250)).await;
+    }
+    let _ = crate::vpn::stop(app).await;
+    Err("core did not become ready in time".into())
 }
 
 async fn traffic_loop(app: AppHandle, api_port: u16) {

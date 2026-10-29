@@ -1,0 +1,11 @@
+/src/main/**/generated
+/src/main/jniLibs/**/*.so
+/src/main/assets/tauri.conf.json
+/tauri.build.gradle.kts
+/proguard-tauri.pro
+/tauri.properties
+# built locally / in CI from the sing-box source
+/libs/libbox*.aar
+
+# Tauri copies the desktop sing-box.exe here from bundle.resources; Android uses libbox instead
+/src/main/assets/binaries

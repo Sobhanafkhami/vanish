@@ -33,6 +33,18 @@ impl Drop for Guard {
 }
 
 pub async fn real_delay(app: &AppHandle, ids: Vec<String>) -> Result<(), String> {
+    // The probe starts its own sing-box process, which Android does not allow; libbox is a single in-process core.
+    #[cfg(target_os = "android")]
+    {
+        let _ = (app, ids);
+        return Err("real delay test is not available on Android yet".into());
+    }
+    #[cfg(not(target_os = "android"))]
+    real_delay_desktop(app, ids).await
+}
+
+#[cfg(not(target_os = "android"))]
+async fn real_delay_desktop(app: &AppHandle, ids: Vec<String>) -> Result<(), String> {
     if RUNNING.swap(true, Ordering::SeqCst) {
         return Err("a delay test is already running".into());
     }

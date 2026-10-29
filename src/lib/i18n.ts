@@ -279,6 +279,10 @@ const fa: Record<string, string> = {
   "Select a server first": "ابتدا یک سرور انتخاب کنید",
 
   // friendly errors
+  "VPN permission was not granted": "مجوز VPN داده نشد",
+  "Allow Vanish to create a VPN connection in the system dialog, then try again.": "در پنجره‌ی سیستم اجازه‌ی ساخت اتصال VPN را به Vanish بدهید و دوباره تلاش کنید.",
+  "Not available on Android yet": "روی اندروید هنوز در دسترس نیست",
+  "Use TCP ping for now.": "فعلاً از پینگ TCP استفاده کنید.",
   "Something went wrong": "مشکلی پیش آمد",
   "Try again. If it keeps happening, open the Core log from the top bar.": "دوباره تلاش کنید. اگر تکرار شد، لاگ هسته را از نوار بالا باز کنید.",
   "This link isn't valid": "این لینک معتبر نیست",
@@ -370,6 +374,8 @@ export interface FriendlyError {
 // Raw messages come from the Rust side (and the OS) in English. Each rule turns one family of them into a plain
 // sentence plus what the user can do about it. The first match wins, so specific rules go before general ones.
 const errorRules: [RegExp, string, string][] = [
+  [/vpn permission denied|permission was revoked/i, "VPN permission was not granted", "Allow Vanish to create a VPN connection in the system dialog, then try again."],
+  [/not available on android/i, "Not available on Android yet", "Use TCP ping for now."],
   [/must start with http/i, "This link isn't valid", "A subscription link must start with http:// or https://."],
   [/already imported/i, "Already added", "This subscription is already in your list."],
   [/name cannot be empty/i, "The name is empty", "Type a name and try again."],
