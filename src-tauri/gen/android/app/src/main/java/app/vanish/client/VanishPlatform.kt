@@ -54,6 +54,7 @@ class VanishPlatform(private val service: VanishVpnService) : PlatformInterface 
 
     // Sockets the core opens to reach the server must bypass the VPN, or they would loop into it.
     override fun autoDetectInterfaceControl(fd: Int) {
+        if (VanishVpnService.probeMode) return // no VPN is up while only measuring delays
         if (!service.protect(fd)) throw Exception("protect($fd) failed")
     }
 

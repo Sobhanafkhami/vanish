@@ -40,7 +40,9 @@ pub async fn real_delay(app: &AppHandle, ids: Vec<String>) -> Result<(), String>
     real_delay_desktop(app, ids).await
 }
 
-/// Android: asks the running core (which carries every node as `p-<id>`, see `config::android_extras`) to time each one.
+/// Android: times every node through the Clash API of an in-process core.
+/// Connected: the running core carries every node as `p-<id>` (see `config::android_extras`).
+/// Not connected: a short-lived headless core is started just for the test (no VPN, no permission prompt).
 #[cfg(target_os = "android")]
 async fn real_delay_android(app: &AppHandle, ids: Vec<String>) -> Result<(), String> {
     if RUNNING.swap(true, Ordering::SeqCst) {
@@ -48,20 +50,52 @@ async fn real_delay_android(app: &AppHandle, ids: Vec<String>) -> Result<(), Str
     }
     let _guard = Guard;
     let state = app.state::<AppState>();
-    if state.active_node.lock().unwrap().is_none() {
-        return Err("connect first to run the real delay test".into());
-    }
-    let (api_port, test_url) = (state.active_ports.lock().unwrap().1, state.settings.lock().unwrap().ping_url.clone());
+    let test_url = state.settings.lock().unwrap().ping_url.clone();
     let client = reqwest::Client::builder().no_proxy().build().map_err(|e| e.to_string())?;
+
+    // (api port, tag per node id)
+    let connected = state.active_node.lock().unwrap().is_some();
+    let (api_port, tags): (u16, Vec<(String, String)>) = if connected {
+        (state.active_ports.lock().unwrap().1, ids.iter().map(|id| (id.clone(), format!("p-{id}"))).collect())
+    } else {
+        let targets: Vec<Node> = state.nodes.lock().unwrap().iter().filter(|n| ids.contains(&n.id)).cloned().collect();
+        if targets.is_empty() {
+            return Ok(());
+        }
+        let api_port = engine::free_port(19190, None);
+        let refs: Vec<&Node> = targets.iter().collect();
+        let path = state.data_dir.join("probe.json");
+        std::fs::write(&path, serde_json::to_vec(&config::probe(&refs, api_port)).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+        crate::vpn::start(app, &path, true).await?;
+
+        let mut ready = false;
+        for _ in 0..80 {
+            if client.get(format!("http://127.0.0.1:{api_port}/version")).timeout(Duration::from_millis(300)).send().await.is_ok() {
+                ready = true;
+                break;
+            }
+            if let Some(err) = crate::vpn::status(app).await?.error {
+                let _ = crate::vpn::stop(app).await;
+                return Err(format!("core exited:\n{err}"));
+            }
+            sleep(Duration::from_millis(250)).await;
+        }
+        if !ready {
+            let _ = crate::vpn::stop(app).await;
+            return Err("probe core did not become ready".into());
+        }
+        (api_port, targets.iter().enumerate().map(|(i, n)| (n.id.clone(), format!("n{i}"))).collect())
+    };
+
     let gate = Arc::new(Semaphore::new(6));
-    let handles: Vec<_> = ids
+    let handles: Vec<_> = tags
         .into_iter()
-        .map(|id| {
+        .map(|(id, tag)| {
             let (client, gate, app, url) = (client.clone(), gate.clone(), app.clone(), test_url.clone());
             tauri::async_runtime::spawn(async move {
                 let _permit = gate.acquire().await;
                 let delay = match client
-                    .get(format!("http://127.0.0.1:{api_port}/proxies/p-{id}/delay"))
+                    .get(format!("http://127.0.0.1:{api_port}/proxies/{tag}/delay"))
                     .query(&[("url", url.as_str()), ("timeout", "6000")])
                     .timeout(Duration::from_secs(9))
                     .send()
@@ -82,6 +116,9 @@ async fn real_delay_android(app: &AppHandle, ids: Vec<String>) -> Result<(), Str
         .collect();
     for h in handles {
         let _ = h.await;
+    }
+    if !connected {
+        let _ = crate::vpn::stop(app).await;
     }
     state.save_nodes()
 }

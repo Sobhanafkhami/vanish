@@ -240,7 +240,7 @@ async fn start_android(app: &AppHandle, cfg_path: &std::path::Path, settings: &c
     if !crate::vpn::prepare(app).await? {
         return Err("vpn permission denied".into());
     }
-    crate::vpn::start(app, cfg_path).await?;
+    crate::vpn::start(app, cfg_path, false).await?;
 
     let api = format!("http://127.0.0.1:{}/version", settings.api_port);
     let client = reqwest::Client::builder().no_proxy().build().unwrap_or_default();

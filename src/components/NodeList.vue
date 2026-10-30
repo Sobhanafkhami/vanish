@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { t } from "../lib/i18n";
 import { computed, nextTick, ref } from "vue";
-import { Activity, ArrowDown, ArrowDownUp, ArrowUp, Check, ChevronDown, ClipboardPaste, EllipsisVertical, Pencil, Plus, QrCode, RefreshCw, Search, Timer, Trash2, X, Zap } from "lucide-vue-next";
+import { Activity, ArrowDown, ArrowDownUp, ArrowUp, Check, ChevronDown, ClipboardPaste, EllipsisVertical, FileText, Link2, Pencil, Plus, QrCode, RefreshCw, Search, Timer, Trash2, X, Zap } from "lucide-vue-next";
 import type { VanishNode } from "../lib/api";
 import SubUsage from "./SubUsage.vue";
 import { fmtBytes, subUsage, usageTone } from "../lib/usage";
@@ -25,6 +25,7 @@ const subUrl = ref("");
 const importKind = ref<"sub" | "links">("sub");
 const showImport = ref(false);
 const showTest = ref(false);
+const showImportMenu = ref(false);
 // Phones have no hover, so a row's extra actions live in a bottom sheet opened by its ⋯ button.
 const sheetNode = ref<VanishNode | null>(null);
 const message = ref("");
@@ -54,6 +55,29 @@ async function doImport() {
     input.value = "";
     showImport.value = false;
   }
+}
+
+/** One tap: take whatever is on the clipboard, a subscription link or a pile of configs, and import it. */
+async function importFromClipboard() {
+  showImportMenu.value = false;
+  let text = "";
+  try {
+    text = (await navigator.clipboard.readText()).trim();
+  } catch {
+    flash(t("Clipboard access was denied"));
+    return;
+  }
+  if (!text) {
+    flash(t("The clipboard is empty"));
+    return;
+  }
+  flash(/^https?:\/\/\S+$/i.test(text) ? await addSubscription("", text) : await importLinks(text));
+}
+
+function openImportForm(kind: "sub" | "links") {
+  showImportMenu.value = false;
+  importKind.value = kind;
+  showImport.value = true;
 }
 
 async function paste() {
@@ -125,23 +149,23 @@ async function deleteSub() {
 </script>
 
 <template>
-  <div class="panel flex min-h-0 flex-1 flex-col p-4">
+  <div class="panel flex min-h-0 flex-1 flex-col p-4 max-md:!border-0 max-md:!bg-transparent max-md:!p-0">
     <div class="mb-3 flex flex-wrap items-center justify-between gap-x-2 gap-y-2">
       <h2 class="flex items-baseline gap-2 text-sm font-semibold text-white">
         {{ t("Servers") }}
         <span class="font-mono text-xs font-normal text-white/45">{{ visible.length }}</span>
       </h2>
-      <div class="grid w-full grid-cols-3 items-stretch gap-2 md:flex md:w-auto md:items-center">
+      <div class="relative grid w-full grid-cols-3 items-stretch gap-2 md:flex md:w-auto md:items-center">
         <button class="btn justify-center !border-accent/40 !text-accent-soft" :disabled="store.busy || !store.nodes.length" :title="t('Ping all, then select the quickest')" @click="connectFastest">
           <Zap :size="13" /> {{ t("Fastest") }}
         </button>
-        <div class="relative">
+        <div class="md:relative">
           <button class="btn w-full justify-center" :aria-expanded="showTest" :disabled="!store.nodes.length" @click="showTest = !showTest">
             <Timer :size="13" /> {{ store.delayTesting ? t("Testing…") : t("Test") }} <ChevronDown :size="12" class="transition" :class="{ 'rotate-180': showTest }" />
           </button>
           <template v-if="showTest">
             <button class="fixed inset-0 z-10 cursor-default" tabindex="-1" aria-hidden="true" @click="showTest = false"></button>
-            <div class="absolute end-0 top-full z-20 mt-1 w-64 max-w-[85vw] rounded-xl border border-ink-line bg-ink-raised p-1 shadow-xl" role="menu">
+            <div class="absolute top-full z-20 mt-1 rounded-xl border border-ink-line bg-ink-raised p-1 shadow-xl max-md:inset-x-0 md:end-0 md:w-64" role="menu">
               <button class="menu-item" role="menuitem" :disabled="store.busy" @click="showTest = false; pingAll()">
                 <Activity :size="14" class="mt-0.5 shrink-0 text-accent-soft" />
                 <span><span class="block text-xs text-white/90">{{ t("TCP ping") }}</span><span class="block text-[11px] text-white/45">{{ t("TCP connect time to each server") }}</span></span>
@@ -153,9 +177,28 @@ async function deleteSub() {
             </div>
           </template>
         </div>
-        <button class="btn justify-center" :class="{ '!border-accent/50 !text-accent-soft': showImport }" :aria-expanded="showImport" @click="showImport = !showImport">
-          <Plus :size="13" /> {{ t("Import") }}
-        </button>
+        <div class="md:relative">
+          <button class="btn w-full justify-center" :class="{ '!border-accent/50 !text-accent-soft': showImport || showImportMenu }" :aria-expanded="showImportMenu" @click="showImportMenu = !showImportMenu">
+            <Plus :size="13" /> {{ t("Import") }}
+          </button>
+          <template v-if="showImportMenu">
+            <button class="fixed inset-0 z-10 cursor-default" tabindex="-1" aria-hidden="true" @click="showImportMenu = false"></button>
+            <div class="absolute top-full z-20 mt-1 rounded-xl border border-ink-line bg-ink-raised p-1 shadow-xl max-md:inset-x-0 md:end-0 md:w-64" role="menu">
+              <button class="menu-item" role="menuitem" @click="importFromClipboard">
+                <ClipboardPaste :size="16" class="mt-0.5 shrink-0 text-accent-soft" />
+                <span><span class="block text-sm text-white/90 md:text-xs">{{ t("Import from clipboard") }}</span><span class="block text-[11px] text-white/45">{{ t("A subscription link or copied configs") }}</span></span>
+              </button>
+              <button class="menu-item" role="menuitem" @click="openImportForm('sub')">
+                <Link2 :size="16" class="mt-0.5 shrink-0 text-accent-soft" />
+                <span><span class="block text-sm text-white/90 md:text-xs">{{ t("Add subscription link") }}</span><span class="block text-[11px] text-white/45">{{ t("Type or paste a subscription URL") }}</span></span>
+              </button>
+              <button class="menu-item" role="menuitem" @click="openImportForm('links')">
+                <FileText :size="16" class="mt-0.5 shrink-0 text-accent-soft" />
+                <span><span class="block text-sm text-white/90 md:text-xs">{{ t("Paste configs") }}</span><span class="block text-[11px] text-white/45">{{ t("vless, vmess, trojan, ss links or JSON") }}</span></span>
+              </button>
+            </div>
+          </template>
+        </div>
       </div>
     </div>
 
@@ -299,22 +342,25 @@ async function deleteSub() {
         v-for="(n, i) in visible"
         :key="n.id"
         :style="{ '--i': Math.min(i, 12) }"
-        class="group flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-3 transition md:py-2"
+        class="group relative flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-3 transition md:py-2"
         :class="store.settings?.selected_node === n.id ? 'border-accent/50 bg-accent/10' : 'border-transparent bg-white/[0.03] hover:bg-white/[0.06]'"
         @click="selectNode(n.id)"
       >
-        <span class="w-14 shrink-0 rounded bg-white/5 px-1.5 py-0.5 text-center font-mono text-[10px] uppercase text-white/60">{{ n.protocol }}</span>
+        <span v-if="store.settings?.selected_node === n.id" class="absolute inset-y-3 start-0 w-[3px] rounded-full bg-accent md:hidden" aria-hidden="true"></span>
+        <span class="hidden w-14 shrink-0 rounded bg-white/5 px-1.5 py-0.5 text-center font-mono text-[10px] uppercase text-white/60 md:block">{{ n.protocol }}</span>
         <div class="min-w-0 flex-1">
-          <div class="truncate text-sm" :class="store.settings?.selected_node === n.id ? 'font-medium text-white' : 'text-white/90'">{{ n.name }}</div>
-          <div class="flex items-center gap-2 truncate font-mono text-[10px] text-white/45">
-            <span class="truncate">{{ n.server }}:{{ n.port }}</span>
+          <!-- the whole name on phones (wraps), one truncated line on desktop -->
+          <div class="break-words text-[15px] leading-snug md:truncate md:text-sm" :class="store.settings?.selected_node === n.id ? 'font-medium text-white' : 'text-white/90'">{{ n.name }}</div>
+          <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-[10px] text-white/45 md:flex-nowrap">
+            <span class="rounded bg-white/5 px-1.5 py-px uppercase text-white/60 md:hidden">{{ n.protocol }}</span>
+            <span class="break-all md:truncate">{{ n.server }}:{{ n.port }}</span>
             <span v-if="n.up_total || n.down_total" class="flex shrink-0 items-center gap-1.5" :title="t('Total traffic through this node')">
               <span class="flex items-center"><ArrowDown :size="9" />{{ fmtBytes(n.down_total) }}</span>
               <span class="flex items-center"><ArrowUp :size="9" />{{ fmtBytes(n.up_total) }}</span>
             </span>
           </div>
         </div>
-        <div class="w-20 shrink-0 whitespace-nowrap text-end font-mono leading-tight md:w-24" :title="n.delay !== null && n.delay > 0 ? t('Real HTTP delay through this server') : t('TCP connect time')">
+        <div class="min-w-[4.5rem] shrink-0 whitespace-nowrap text-end font-mono leading-tight md:w-24" :title="n.delay !== null && n.delay > 0 ? t('Real HTTP delay through this server') : t('TCP connect time')">
           <template v-if="n.delay !== null">
             <div class="text-sm" :class="latencyClass(n.delay < 0 ? 99999 : n.delay, 400, 800)">{{ delayText(n.delay) }}</div>
           </template>

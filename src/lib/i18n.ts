@@ -278,6 +278,15 @@ const fa: Record<string, string> = {
   "Add a subscription link or paste a config.": "لینک اشتراک اضافه کنید یا کانفیگ را بچسبانید.",
   "Select a server first": "ابتدا یک سرور انتخاب کنید",
 
+  "Import from clipboard": "ایمپورت از کلیپ‌بورد",
+  "A subscription link or copied configs": "لینک اشتراک یا کانفیگ‌های کپی‌شده",
+  "Add subscription link": "افزودن لینک اشتراک",
+  "Type or paste a subscription URL": "آدرس اشتراک را بنویسید یا بچسبانید",
+  "Paste configs": "چسباندن کانفیگ",
+  "vless, vmess, trojan, ss links or JSON": "لینک vless، vmess، trojan، ss یا JSON",
+  "The clipboard is empty": "کلیپ‌بورد خالی است",
+  More: "بیشتر",
+
   // friendly errors
   "VPN permission was not granted": "مجوز VPN داده نشد",
   "Allow Vanish to create a VPN connection in the system dialog, then try again.": "در پنجره‌ی سیستم اجازه‌ی ساخت اتصال VPN را به Vanish بدهید و دوباره تلاش کنید.",

@@ -55,10 +55,11 @@ pub async fn prepare(app: &AppHandle) -> Result<bool, String> {
     Ok(r.granted)
 }
 
-pub async fn start(app: &AppHandle, config: &Path) -> Result<(), String> {
+/// `probe`: run the core headless (no VPN interface, no permission) just to time servers.
+pub async fn start(app: &AppHandle, config: &Path, probe: bool) -> Result<(), String> {
     handle(app)
         .0
-        .run_mobile_plugin_async::<serde_json::Value>("start", json!({ "config": config.to_string_lossy() }))
+        .run_mobile_plugin_async::<serde_json::Value>("start", json!({ "config": config.to_string_lossy(), "probe": probe }))
         .await
         .map(|_| ())
         .map_err(|e| e.to_string())

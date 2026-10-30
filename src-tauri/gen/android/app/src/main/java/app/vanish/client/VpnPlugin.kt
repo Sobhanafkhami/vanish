@@ -20,6 +20,7 @@ import app.tauri.plugin.Plugin
 @InvokeArg
 class StartArgs {
     var config: String = ""
+    var probe: Boolean = false
 }
 
 /** The bridge the Rust side calls (see src/vpn.rs): permission, start/stop, status, installed apps. */
@@ -53,6 +54,7 @@ class VpnPlugin(private val activity: Activity) : Plugin(activity) {
         val intent = Intent(activity, VanishVpnService::class.java)
             .setAction(VanishVpnService.ACTION_START)
             .putExtra(VanishVpnService.EXTRA_CONFIG, args.config)
+            .putExtra(VanishVpnService.EXTRA_PROBE, args.probe)
         ContextCompat.startForegroundService(activity, intent)
         invoke.resolve()
     }

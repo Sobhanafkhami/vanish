@@ -29,11 +29,14 @@ class VanishVpnService : VpnService(), CommandServerHandler {
         const val ACTION_START = "app.vanish.client.vpn.START"
         const val ACTION_STOP = "app.vanish.client.vpn.STOP"
         const val EXTRA_CONFIG = "config"
+        const val EXTRA_PROBE = "probe"
         private const val CHANNEL_ID = "vanish-vpn"
         private const val NOTIFICATION_ID = 1
         private const val TAG = "VanishVpn"
 
         @Volatile var running = false
+        /** True while the core only runs delay tests: no VPN interface exists, so sockets must not be protect()ed. */
+        @Volatile var probeMode = false
         @Volatile var lastError: String? = null
         private var setupDone = false
     }
@@ -51,7 +54,8 @@ class VanishVpnService : VpnService(), CommandServerHandler {
             }
             ACTION_START -> {
                 val path = intent.getStringExtra(EXTRA_CONFIG)
-                showForeground()
+                probeMode = intent.getBooleanExtra(EXTRA_PROBE, false)
+                showForeground(probeMode)
                 lastError = null
                 thread(name = "vanish-core-start") { startCore(path) }
             }
@@ -59,7 +63,7 @@ class VanishVpnService : VpnService(), CommandServerHandler {
         return START_NOT_STICKY
     }
 
-    private fun showForeground() {
+    private fun showForeground(probe: Boolean) {
         val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             manager.createNotificationChannel(NotificationChannel(CHANNEL_ID, "VPN status", NotificationManager.IMPORTANCE_LOW))
@@ -75,7 +79,7 @@ class VanishVpnService : VpnService(), CommandServerHandler {
         val notification = builder
             .setSmallIcon(android.R.drawable.ic_lock_lock)
             .setContentTitle("Vanish")
-            .setContentText("VPN is on")
+            .setContentText(if (probe) "Testing servers…" else "VPN is on")
             .setOngoing(true)
             .setContentIntent(open)
             .build()
@@ -91,6 +95,7 @@ class VanishVpnService : VpnService(), CommandServerHandler {
             val config = File(requireNotNull(path) { "no config path" }).readText()
             configPath = path
             setupOnce()
+            releaseCore() // a probe may be running, or the previous connection is still shutting down
             val platform = VanishPlatform(this)
             val s = Libbox.newCommandServer(this, platform)
             server = s
@@ -118,13 +123,19 @@ class VanishVpnService : VpnService(), CommandServerHandler {
         setupDone = true
     }
 
-    private fun stopCore() {
+    /** Closes the core and the tun descriptor, leaving the foreground notification alone. */
+    private fun releaseCore() {
         running = false
         runCatching { server?.closeService() }
         runCatching { server?.close() }
         server = null
         runCatching { tunPfd?.close() }
         tunPfd = null
+    }
+
+    private fun stopCore() {
+        releaseCore()
+        probeMode = false
         runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
         runCatching { (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).cancel(NOTIFICATION_ID) }
     }
