@@ -10,6 +10,8 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.Process
+import android.system.Os
+import android.util.Log
 import android.system.OsConstants
 import io.nekohasekai.libbox.BridgeOptions
 import io.nekohasekai.libbox.BridgeSession
@@ -36,6 +38,10 @@ import java.net.NetworkInterface as JavaNetworkInterface
 
 /** Tells libbox how to talk to Android: open the TUN, protect sockets, report the underlying network. */
 class VanishPlatform(private val service: VanishVpnService) : PlatformInterface {
+    private companion object {
+        const val TAG = "VanishVpn"
+    }
+
     private val connectivity = service.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
     private var callback: ConnectivityManager.NetworkCallback? = null
     @Volatile private var underlying: Network? = null
@@ -81,7 +87,6 @@ class VanishPlatform(private val service: VanishVpnService) : PlatformInterface 
         val request = NetworkRequest.Builder()
             .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
             .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_RESTRICTED)
-            .removeCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
             .build()
         val cb = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) = publish(network, listener)
@@ -106,9 +111,31 @@ class VanishPlatform(private val service: VanishVpnService) : PlatformInterface 
         callback = null
     }
 
+    /**
+     * Interface index by name. java.net.NetworkInterface needs a netlink socket, which Android 11+ denies to apps,
+     * so it comes back empty there; if_nametoindex is a plain ioctl and always works.
+     */
+    private fun indexOf(name: String): Int? {
+        val viaOs = runCatching { Os.if_nametoindex(name) }.getOrDefault(0)
+        if (viaOs > 0) return viaOs
+        return runCatching { JavaNetworkInterface.getByName(name)?.index }.getOrNull()
+    }
+
     private fun publish(network: Network, listener: InterfaceUpdateListener) {
-        val name = connectivity.getLinkProperties(network)?.interfaceName ?: return
-        val index = runCatching { JavaNetworkInterface.getByName(name)?.index }.getOrNull() ?: return
+        // Our own tun0 is also a "network". Reporting it as the default interface makes the core try to leave through
+        // itself, so there is nothing left to dial out on ("no available network interface").
+        if (connectivity.getNetworkCapabilities(network)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true) return
+        val name = connectivity.getLinkProperties(network)?.interfaceName
+        if (name == null) {
+            Log.w(TAG, "default network has no interface name")
+            return
+        }
+        val index = indexOf(name)
+        if (index == null) {
+            Log.w(TAG, "no index for interface $name")
+            return
+        }
+        Log.i(TAG, "default interface: $name ($index)")
         val metered = connectivity.getNetworkCapabilities(network)?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) == false
         underlying = network
         service.setUnderlyingNetworks(arrayOf(network))
@@ -121,27 +148,19 @@ class VanishPlatform(private val service: VanishVpnService) : PlatformInterface 
             val lp = connectivity.getLinkProperties(network) ?: continue
             val caps = connectivity.getNetworkCapabilities(network) ?: continue
             val name = lp.interfaceName ?: continue
-            val java = runCatching { JavaNetworkInterface.getByName(name) }.getOrNull() ?: continue
-            var flags = 0
-            if (java.isUp) flags = flags or OsConstants.IFF_UP or OsConstants.IFF_RUNNING
-            if (java.isLoopback) flags = flags or OsConstants.IFF_LOOPBACK
-            if (java.isPointToPoint) flags = flags or OsConstants.IFF_POINTOPOINT
-            if (java.supportsMulticast()) flags = flags or OsConstants.IFF_MULTICAST
-            if (!java.isLoopback && !java.isPointToPoint) flags = flags or OsConstants.IFF_BROADCAST
+            val index = indexOf(name) ?: continue
             result += NetworkInterface().also {
                 it.name = name
-                it.index = java.index
-                it.mtu = java.mtu
-                it.flags = flags
+                it.index = index
+                it.mtu = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && lp.mtu > 0) lp.mtu else 1500
+                it.flags = OsConstants.IFF_UP or OsConstants.IFF_RUNNING or OsConstants.IFF_BROADCAST or OsConstants.IFF_MULTICAST
                 it.type = when {
                     caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> Libbox.InterfaceTypeWIFI
                     caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> Libbox.InterfaceTypeCellular
                     caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> Libbox.InterfaceTypeEthernet
                     else -> Libbox.InterfaceTypeOther
                 }
-                it.addresses = StringArray(
-                    java.interfaceAddresses.map { a -> "${a.address.hostAddress?.substringBefore('%')}/${a.networkPrefixLength}" },
-                )
+                it.addresses = StringArray(lp.linkAddresses.mapNotNull { a -> a.address.hostAddress?.substringBefore('%')?.let { h -> "$h/${a.prefixLength}" } })
                 it.dnsServer = StringArray(lp.dnsServers.mapNotNull { d -> d.hostAddress?.substringBefore('%') })
                 it.gateway = StringArray(
                     lp.routes.filter { r -> r.isDefaultRoute }.mapNotNull { r -> r.gateway?.hostAddress?.substringBefore('%') },

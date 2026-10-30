@@ -152,15 +152,17 @@ class VanishVpnService : VpnService(), CommandServerHandler {
             while (routes6.hasNext()) routes6.next().let { builder.addRoute(it.address(), it.prefix()); routed6 = true }
             if (!routed6) builder.addRoute("::", 0)
 
-            // Only the listed apps enter the tunnel (game mode); otherwise everything does except Vanish itself,
-            // so the app's own lookups and update checks never loop back into the core.
+            // Vanish itself must stay inside the VPN. The core's TCP stack answers apps from a socket in this very
+            // process; if the process were excluded, those replies would leave through the normal network instead of
+            // the tunnel and no TCP connection would ever complete. The core's own sockets are protect()ed instead.
             val include = options.includePackage
             val exclude = options.excludePackage
             if (include.hasNext()) {
+                // Game mode: only the listed games use the tunnel, plus this app for the reason above.
                 while (include.hasNext()) runCatching { builder.addAllowedApplication(include.next()) }
+                runCatching { builder.addAllowedApplication(packageName) }
             } else {
                 while (exclude.hasNext()) runCatching { builder.addDisallowedApplication(exclude.next()) }
-                runCatching { builder.addDisallowedApplication(packageName) }
             }
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) builder.setMetered(false)
