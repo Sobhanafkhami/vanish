@@ -13,16 +13,13 @@ traffic stats and latency work as on desktop.
 
 ## Building libbox.aar
 
-Use Go 1.25.5 and the sing-box tag in `package.json`/`Cargo` notes (currently v1.14.3):
-
 ```bash
-go install github.com/sagernet/gomobile/cmd/gomobile@v0.1.13
-go install github.com/sagernet/gomobile/cmd/gobind@v0.1.13
-go run ./cmd/internal/build_libbox -target android -platform android/arm64
+scripts/build-libbox.sh      # needs Go 1.25+, JDK 17, Android SDK + NDK r27 (licenses accepted)
 ```
 
-Two edits to `cmd/internal/build_libbox/main.go` were needed with NDK r27: drop the `with_naive_outbound` tag
-(its `libcronet.a` needs the NDK r28 linker) and skip the legacy SDK 21 variant.
+The script clones sing-box (`SING_BOX_TAG`, default v1.14.3), applies two small edits to its build tool (drops the
+`with_naive_outbound` tag, whose `libcronet.a` needs the NDK r28 linker, and skips the SDK 21 variant), builds the arm64
+library with gomobile and copies it to `src-tauri/gen/android/app/libs/libbox.aar`.
 
 ## APK
 
@@ -32,7 +29,25 @@ npx tauri android build --debug --target aarch64 --apk
 
 ## Known gaps
 
-- "Real delay" test is desktop-only (it starts a second sing-box process); TCP ping works.
-- No core log on Android yet.
+- "Real delay" runs through the connected core, or through a short-lived headless core when disconnected.
+- The Core log view tails the file libbox writes (`core.log` in the app data folder).
 - Only arm64 has a libbox build; other ABIs would crash at start.
-- Not tried on a device or emulator yet.
+- Tested on a physical Android 12 phone (Samsung A24); no emulator build.
+
+## Releases and updates
+
+The `android` job in `.github/workflows/release.yml` runs after the desktop release is created: it builds libbox
+(cached), builds a **signed release APK** and uploads `Vanish_<version>_android-arm64.apk` to the same GitHub release.
+
+One-time setup. Create a keystore and **back it up**: an update only installs over an app signed with the same key.
+
+```bash
+keytool -genkeypair -v -keystore vanish.jks -alias vanish -keyalg RSA -keysize 2048 -validity 10000
+base64 -w0 vanish.jks     # value for ANDROID_KEYSTORE_BASE64
+```
+
+Add these repository secrets: `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`,
+`ANDROID_KEY_PASSWORD`. Never commit the keystore.
+
+In the app, "Check for updates" (Settings) and a snackbar shown a few seconds after launch use the GitHub API to find
+a newer release that has an `android-arm64.apk` asset, download it and open the system installer.

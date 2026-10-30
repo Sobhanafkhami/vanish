@@ -73,6 +73,24 @@ pub async fn status(app: &AppHandle) -> Result<Status, String> {
     handle(app).0.run_mobile_plugin_async("status", json!({})).await.map_err(|e| e.to_string())
 }
 
+/// Hands a downloaded APK to the system installer.
+pub async fn install_apk(app: &AppHandle, path: &Path) -> Result<(), String> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Reply {
+        needs_permission: bool,
+    }
+    let r: Reply = handle(app)
+        .0
+        .run_mobile_plugin_async("installApk", json!({ "path": path.to_string_lossy() }))
+        .await
+        .map_err(|e| e.to_string())?;
+    if r.needs_permission {
+        return Err("install permission needed".into());
+    }
+    Ok(())
+}
+
 /// Launchable apps installed on the phone: `name` is the package id, `title` the label.
 pub async fn list_apps(app: &AppHandle) -> Result<Vec<AppEntry>, String> {
     let r: Apps = handle(app).0.run_mobile_plugin_async("listApps", json!({})).await.map_err(|e| e.to_string())?;

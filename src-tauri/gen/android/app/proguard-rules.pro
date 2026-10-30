@@ -19,3 +19,9 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+# libbox (gomobile) and the Tauri plugin bridge are reached from native code by name; R8 must not rename or strip them.
+-keep class go.** { *; }
+-keep class io.nekohasekai.** { *; }
+-keep class app.vanish.client.** { *; }
+-keep class app.tauri.** { *; }
+-keepclasseswithmembernames class * { native <methods>; }

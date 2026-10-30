@@ -1,6 +1,7 @@
 import { computed, reactive } from "vue";
 import { listen } from "@tauri-apps/api/event";
 import { errorText, friendlyError, t } from "../lib/i18n";
+import { isMobile } from "../lib/platform";
 import {
   api,
   type CoreStatus,
@@ -396,7 +397,8 @@ export async function checkForUpdate(): Promise<string> {
 export async function installUpdate() {
   store.updating = true;
   try {
-    await api.installUpdate(); // restarts the app on success
+    await api.installUpdate(); // desktop restarts here; on Android the system installer takes over
+    if (isMobile) store.updating = false;
   } catch (e) {
     fail(e);
     store.updating = false;

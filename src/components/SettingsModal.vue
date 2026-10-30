@@ -211,7 +211,7 @@ async function onCheck() {
           <button v-if="store.update" class="btn !border-accent/50 !text-accent-soft" :disabled="store.updating" @click="installUpdate">
             {{ store.updating ? t("Updating…") : t("Install {v}", { v: store.update.version }) }}
           </button>
-          <button v-if="!isMobile" class="btn" :disabled="checking" @click="onCheck">{{ checking ? "Checking…" : "Check for updates" }}</button>
+          <button class="btn" :disabled="checking" @click="onCheck">{{ checking ? "Checking…" : "Check for updates" }}</button>
         </div>
       </div>
       <p v-if="updateStatus" class="text-xs text-white/55" role="status">{{ updateStatus }}</p>

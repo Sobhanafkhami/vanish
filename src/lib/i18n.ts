@@ -287,6 +287,10 @@ const fa: Record<string, string> = {
   "The clipboard is empty": "کلیپ‌بورد خالی است",
   More: "بیشتر",
 
+  // updates (Android)
+  "Allow installing apps": "اجازه‌ی نصب برنامه",
+  "Turn on \"Allow from this source\" for Vanish on the page that just opened, then press Update again.": "در صفحه‌ای که باز شد گزینه‌ی «اجازه از این منبع» را برای Vanish روشن کنید و دوباره به‌روزرسانی را بزنید.",
+
   // friendly errors
   "VPN permission was not granted": "مجوز VPN داده نشد",
   "Allow Vanish to create a VPN connection in the system dialog, then try again.": "در پنجره‌ی سیستم اجازه‌ی ساخت اتصال VPN را به Vanish بدهید و دوباره تلاش کنید.",
@@ -385,6 +389,7 @@ export interface FriendlyError {
 const errorRules: [RegExp, string, string][] = [
   [/vpn permission denied|permission was revoked/i, "VPN permission was not granted", "Allow Vanish to create a VPN connection in the system dialog, then try again."],
   [/not available on android/i, "Not available on Android yet", "Use TCP ping for now."],
+  [/install permission needed/i, "Allow installing apps", "Turn on \"Allow from this source\" for Vanish on the page that just opened, then press Update again."],
   [/must start with http/i, "This link isn't valid", "A subscription link must start with http:// or https://."],
   [/already imported/i, "Already added", "This subscription is already in your list."],
   [/name cannot be empty/i, "The name is empty", "Type a name and try again."],

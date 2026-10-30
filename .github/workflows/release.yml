@@ -1,6 +1,7 @@
 name: Release
 
-# Every push to main (even an empty commit) builds the Windows installers and publishes a GitHub release.
+# Every push to main (even an empty commit) builds the Windows installers and publishes a GitHub release;
+# the `android` job then attaches the signed arm64 APK to that same release.
 # Version = <major>.<minor> from package.json + the workflow run number as the patch,
 # so each release is newer than the last and the in-app updater always sees it.
 on:
@@ -84,3 +85,98 @@ jobs:
             --target "${GITHUB_SHA}" \
             --title "Vanish v${VERSION}" \
             --generate-notes
+
+  # Builds the signed Android APK and uploads it to the release the job above just created.
+  # One-time setup: repository secrets ANDROID_KEYSTORE_BASE64 (base64 of the .jks), ANDROID_KEYSTORE_PASSWORD,
+  # ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD. Keep the keystore: updates only install over an app signed with it.
+  android:
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check signing key
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE" ]; then
+            echo "::error::Secret ANDROID_KEYSTORE_BASE64 is not set. See docs/android.md (Releases) for how to create the keystore."
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.25.5
+          cache: false
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Android SDK and NDK
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;27.2.12479018" "platforms;android-36" "build-tools;36.0.0"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+
+      - name: Compute version
+        id: version
+        run: |
+          base=$(node -p "require('./package.json').version.split('.').slice(0, 2).join('.')")
+          echo "value=${base}.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+
+      - name: Stamp version
+        run: node scripts/set-version.mjs ${{ steps.version.outputs.value }}
+
+      - name: Cache libbox
+        id: libbox
+        uses: actions/cache@v4
+        with:
+          path: src-tauri/gen/android/app/libs/libbox.aar
+          key: libbox-${{ hashFiles('scripts/build-libbox.sh') }}
+
+      - name: Build libbox (sing-box core)
+        if: steps.libbox.outputs.cache-hit != 'true'
+        run: bash scripts/build-libbox.sh
+
+      - run: npm ci
+
+      - name: Prepare signing key
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          echo "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/vanish.jks"
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/vanish.jks" >> "$GITHUB_ENV"
+
+      - name: Build APK
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: npx tauri android build --apk --target aarch64 --ci
+
+      - name: Attach APK to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          apk=$(find src-tauri/gen/android/app/build/outputs/apk -name '*-release*.apk' | head -n 1)
+          test -n "$apk" || { echo "::error::no release APK was produced"; exit 1; }
+          cp "$apk" "Vanish_${VERSION}_android-arm64.apk"
+          gh release upload "v${VERSION}" "Vanish_${VERSION}_android-arm64.apk" --clobber

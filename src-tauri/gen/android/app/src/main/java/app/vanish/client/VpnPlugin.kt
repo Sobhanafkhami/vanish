@@ -4,6 +4,10 @@ import android.Manifest
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
+import android.provider.Settings
+import androidx.core.content.FileProvider
+import java.io.File
 import android.net.VpnService
 import android.os.Build
 import androidx.activity.result.ActivityResult
@@ -21,6 +25,11 @@ import app.tauri.plugin.Plugin
 class StartArgs {
     var config: String = ""
     var probe: Boolean = false
+}
+
+@InvokeArg
+class InstallArgs {
+    var path: String = ""
 }
 
 /** The bridge the Rust side calls (see src/vpn.rs): permission, start/stop, status, installed apps. */
@@ -70,6 +79,27 @@ class VpnPlugin(private val activity: Activity) : Plugin(activity) {
         val result = JSObject().put("running", VanishVpnService.running)
         VanishVpnService.lastError?.let { result.put("error", it) }
         invoke.resolve(result)
+    }
+
+    /** Opens the system installer on a downloaded update; asks for the "install unknown apps" switch first. */
+    @Command
+    fun installApk(invoke: Invoke) {
+        val args = invoke.parseArgs(InstallArgs::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !activity.packageManager.canRequestPackageInstalls()) {
+            activity.startActivity(
+                Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${activity.packageName}"))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+            invoke.resolve(JSObject().put("needsPermission", true))
+            return
+        }
+        val uri = FileProvider.getUriForFile(activity, "${activity.packageName}.fileprovider", File(args.path))
+        activity.startActivity(
+            Intent(Intent.ACTION_VIEW)
+                .setDataAndType(uri, "application/vnd.android.package-archive")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+        invoke.resolve(JSObject().put("needsPermission", false))
     }
 
     /** Launchable apps, for the game list. Uses the launcher intent so no broad package permission is needed. */

@@ -37,6 +37,7 @@ const modeLocked = computed(() => store.status.running || gameOn.value);
 // Phones show one column at a time (bottom tabs); desktop shows both side by side.
 const view = ref<"home" | "servers">("home");
 const showDetails = ref(false);
+const updateDismissed = ref(false);
 const showRaw = ref(false);
 
 const latencyText = computed(() => (store.latency === null ? "—" : String(store.latency)));
@@ -68,9 +69,17 @@ function dismissError() {
     <TitleBar />
 
     <Transition name="fade">
-      <div v-if="store.update" class="flex items-center justify-between gap-3 border-b border-accent/20 bg-accent/10 px-4 py-2 text-xs" role="status">
+      <!-- a bar under the title on desktop, a snackbar above the tabs on phones -->
+      <div
+        v-if="store.update && !updateDismissed"
+        class="flex items-center justify-between gap-3 border-b border-accent/20 bg-accent/10 px-4 py-2 text-xs max-md:fixed max-md:inset-x-3 max-md:bottom-[4.75rem] max-md:z-40 max-md:rounded-xl max-md:border max-md:border-accent/40 max-md:bg-ink-raised max-md:px-3 max-md:py-2.5 max-md:text-sm max-md:shadow-xl"
+        role="status"
+      >
         <span class="flex items-center gap-2 text-accent-soft"><Download :size="14" /> {{ t("Version {v} is available", { v: store.update.version }) }}</span>
-        <button class="btn !border-accent/50 !text-accent-soft" :disabled="store.updating" @click="installUpdate">{{ store.updating ? t("Updating…") : t("Update now") }}</button>
+        <span class="flex shrink-0 items-center gap-1">
+          <button class="btn !border-accent/50 !text-accent-soft" :disabled="store.updating" @click="installUpdate">{{ store.updating ? t("Updating…") : t("Update now") }}</button>
+          <button class="grid h-9 w-9 place-items-center rounded-lg text-white/50 hover:text-white md:hidden" :aria-label="t('Dismiss')" @click="updateDismissed = true"><X :size="16" /></button>
+        </span>
       </div>
     </Transition>
 
