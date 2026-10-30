@@ -4,6 +4,7 @@ import { computed } from "vue";
 import { AppWindow, Gamepad2, Plus, X } from "lucide-vue-next";
 import Toggle from "./Toggle.vue";
 import { removeGameApp, setGameMode, store } from "../stores/app";
+import { isMobile } from "../lib/platform";
 
 const on = computed(() => !!store.settings?.game_mode);
 const g = computed(() => store.game);
@@ -97,7 +98,7 @@ const bars = computed(() =>
             </p>
           </div>
 
-          <p class="mt-2 border-t border-ink-line pt-2 text-[11px] leading-snug text-white/40">{{ t("Uses TUN, so run Vanish as administrator. If the server stops answering, Vanish switches to the next-best one within seconds.") }}</p>
+          <p class="mt-2 border-t border-ink-line pt-2 text-[11px] leading-snug text-white/40">{{ isMobile ? t("If the server stops answering, Vanish switches to the next-best one within seconds.") : t("Uses TUN, so run Vanish as administrator. If the server stops answering, Vanish switches to the next-best one within seconds.") }}</p>
         </div>
       </div>
     </div>
