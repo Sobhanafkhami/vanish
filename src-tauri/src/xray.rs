@@ -21,6 +21,16 @@ pub struct Running {
     pub ports: HashMap<String, u16>,
     /// Addresses Xray dials. TUN would route them back into the tunnel (and into Xray), so they go direct.
     pub server_ips: Vec<String>,
+    pub log_path: PathBuf,
+}
+
+impl Running {
+    /// Last lines Xray wrote (handshake and dial errors), for the Core log.
+    pub fn log_tail(&self, lines: usize) -> Vec<String> {
+        let text = std::fs::read_to_string(&self.log_path).unwrap_or_default();
+        let all: Vec<&str> = text.lines().collect();
+        all[all.len().saturating_sub(lines)..].iter().map(|l| format!("xray: {l}")).collect()
+    }
 }
 
 impl Running {
@@ -149,7 +159,7 @@ pub async fn start(app: &AppHandle, nodes: &[Node]) -> Result<Option<Running>, S
         }
         if TcpStream::connect(("127.0.0.1", probe_port)).await.is_ok() {
             let _ = std::fs::remove_file(&cfg_path);
-            return Ok(Some(Running { child, ports, server_ips }));
+            return Ok(Some(Running { child, ports, server_ips, log_path }));
         }
         sleep(Duration::from_millis(100)).await;
     }

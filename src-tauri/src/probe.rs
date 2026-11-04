@@ -54,16 +54,20 @@ fn record(app: &AppHandle, id: String, delay: i32) {
 }
 
 /// One delay request through the Clash API; -1 on timeout or error.
-async fn delay_once(client: &reqwest::Client, api_port: u16, tag: &str, url: &str) -> i32 {
-    match client
+async fn delay_once(client: &reqwest::Client, api_port: u16, tag: &str, url: &str) -> Result<i32, String> {
+    let resp = client
         .get(format!("http://127.0.0.1:{api_port}/proxies/{tag}/delay"))
         .query(&[("url", url), ("timeout", "6000")])
         .timeout(Duration::from_secs(9))
         .send()
         .await
-    {
-        Ok(r) if r.status().is_success() => r.json::<serde_json::Value>().await.ok().and_then(|v| v["delay"].as_i64()).map_or(-1, |d| d as i32),
-        _ => -1,
+        .map_err(|e| e.to_string())?;
+    let ok = resp.status().is_success();
+    let body = resp.json::<serde_json::Value>().await.map_err(|e| e.to_string())?;
+    if ok {
+        body["delay"].as_i64().map(|d| d as i32).ok_or_else(|| "no delay in answer".to_string())
+    } else {
+        Err(body["message"].as_str().unwrap_or("failed").to_string())
     }
 }
 
@@ -72,13 +76,13 @@ async fn delay_once(client: &reqwest::Client, api_port: u16, tag: &str, url: &st
 /// TLS flight. A single cold sample is also at the mercy of one lost packet, which is how a healthy server ends
 /// up as "timeout" here and 150 ms in v2rayNG. Two attempts, the better one reported, give the steady figure
 /// those clients show (and a failed first try gets its second chance).
-async fn measure(client: &reqwest::Client, api_port: u16, tag: &str, url: &str) -> i32 {
+async fn measure(client: &reqwest::Client, api_port: u16, tag: &str, url: &str) -> (i32, Option<String>) {
     let first = delay_once(client, api_port, tag, url).await;
     let second = delay_once(client, api_port, tag, url).await;
     match (first, second) {
-        (a, b) if a >= 0 && b >= 0 => a.min(b),
-        (a, _) if a >= 0 => a,
-        (_, b) => b,
+        (Ok(a), Ok(b)) => (a.min(b), None),
+        (Ok(a), Err(_)) | (Err(_), Ok(a)) => (a, None),
+        (Err(_), Err(e)) => (-1, Some(e)),
     }
 }
 
@@ -92,13 +96,24 @@ async fn run_delays(app: &AppHandle, client: &reqwest::Client, api_port: u16, ta
             let (client, gate, app, url) = (client.clone(), gate.clone(), app.clone(), url.to_string());
             tauri::async_runtime::spawn(async move {
                 let _permit = gate.acquire().await;
-                let delay = measure(&client, api_port, &tag, &url).await;
+                let (delay, err) = measure(&client, api_port, &tag, &url).await;
+                if let Some(e) = err {
+                    // The reason a node timed out (dial error, handshake, ...) is what tells a bad node from a bad client.
+                    let name = app.state::<AppState>().nodes.lock().unwrap().iter().find(|n| n.id == id).map(|n| n.name.clone()).unwrap_or_default();
+                    let _ = app.emit("core-log", format!("delay {name}: {e}"));
+                }
                 record(&app, id, delay);
             })
         })
         .collect();
     for h in handles {
         let _ = h.await;
+    }
+}
+
+fn log_xray(app: &AppHandle, x: &crate::xray::Running) {
+    for line in x.log_tail(12) {
+        let _ = app.emit("core-log", line);
     }
 }
 
@@ -183,6 +198,7 @@ async fn real_delay_android(app: &AppHandle, ids: Vec<String>) -> Result<(), Str
         let _ = crate::vpn::stop(app).await;
     }
     if let Some(x) = probe_xray {
+        log_xray(app, &x);
         x.kill().await;
     }
     state.save_nodes()
@@ -268,6 +284,9 @@ async fn real_delay_desktop(app: &AppHandle, ids: Vec<String>) -> Result<(), Str
     let tags: Vec<(String, String)> = targets.iter().enumerate().map(|(i, n)| (n.id.clone(), format!("n{i}"))).collect();
     run_delays(app, &client, api_port, tags, &test_url, 8).await;
     let _ = child.kill().await;
+    if let Some(x) = &xray {
+        log_xray(app, x);
+    }
     kill_xray(xray).await;
     state.save_nodes()
 }
