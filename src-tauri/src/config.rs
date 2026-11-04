@@ -41,6 +41,18 @@ fn tune_outbound(ob: &mut Value, game: bool) {
     if ob["type"] == "vless" && ob.get("packet_encoding").is_none() {
         ob["packet_encoding"] = json!("xudp");
     }
+    // Saved nodes were parsed before the transport decided the ALPN: a WebSocket cannot ride h2 (the server
+    // closes the stream), gRPC needs it.
+    if ob["tls"]["enabled"] == true {
+        let alpn = match ob["transport"]["type"].as_str() {
+            Some("ws" | "httpupgrade") => Some("http/1.1"),
+            Some("grpc" | "http") => Some("h2"),
+            _ => None,
+        };
+        if let Some(alpn) = alpn {
+            ob["tls"]["alpn"] = json!([alpn]);
+        }
+    }
     // `path=/ws?ed=2048` is the Xray convention for WebSocket early data: the first payload rides in the
     // handshake, saving a round trip on every new connection. sing-box needs it spelled out.
     if ob["transport"]["type"] == "ws" && ob["transport"].get("max_early_data").is_none() {

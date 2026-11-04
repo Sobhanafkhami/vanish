@@ -99,15 +99,13 @@ fn tls_from(q: &Query, server: &str, default_tls: bool) -> Option<Value> {
     if matches!(q.get("allowInsecure").or(q.get("insecure")).map(String::as_str), Some("1" | "true")) {
         tls["insecure"] = json!(true);
     }
-    // Without an explicit ALPN a Chrome-like hello offers h2, a CDN picks it, and a WebSocket upgrade then
-    // never completes (a timeout in the delay test). Xray-based clients pin the ALPN per transport.
-    let alpn: Vec<&str> = match nonempty(q, "alpn") {
-        Some(a) => a.split(',').map(str::trim).filter(|s| !s.is_empty()).collect(),
-        None => match net_type(q) {
-            "ws" | "httpupgrade" => vec!["http/1.1"],
-            "grpc" | "http" => vec!["h2"],
-            _ => vec![],
-        },
+    // The transport decides the ALPN, not the link: a WebSocket upgrade only exists in HTTP/1.1, so a link that
+    // lists `alpn=h2,h3` (Xray-based clients ignore that for WS) would have the CDN pick h2 and the server then
+    // closes the stream (EOF, a timeout in the delay test). gRPC needs h2.
+    let alpn: Vec<&str> = match net_type(q) {
+        "ws" | "httpupgrade" => vec!["http/1.1"],
+        "grpc" | "http" => vec!["h2"],
+        _ => nonempty(q, "alpn").map(|a| a.split(',').map(str::trim).filter(|s| !s.is_empty()).collect()).unwrap_or_default(),
     };
     if !alpn.is_empty() {
         tls["alpn"] = json!(alpn);
@@ -509,6 +507,13 @@ mod tests {
         assert!(n.xray.is_none());
         assert_eq!(n.outbound["tls"]["server_name"], "cdn.example.com");
         assert_eq!(n.outbound["tls"]["alpn"][0], "http/1.1");
+    }
+
+    #[test]
+    fn ws_alpn_ignores_h2_in_link() {
+        let n = parse_link("vless://u@api.example.com:443?alpn=h2%2Ch3&encryption=none&fp=chrome&host=api.example.com&path=%2F&security=tls&sni=api.example.com&type=ws#w").unwrap();
+        assert_eq!(n.outbound["tls"]["alpn"], json!(["http/1.1"]));
+        assert!(n.xray.is_none());
     }
 
     #[test]
