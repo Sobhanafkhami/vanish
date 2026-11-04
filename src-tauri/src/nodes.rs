@@ -519,10 +519,37 @@ mod tests {
 
     #[test]
     fn kcp_and_tcp_http_header_go_to_xray() {
-        let k = parse_link("vless://u@example.com:443?type=kcp&headerType=wechat-video&seed=abc#k").unwrap();
+        let k = parse_link("vless://u@10.0.0.1:443?type=kcp&headerType=wechat-video&seed=abc#k").unwrap();
         assert_eq!(k.xray.unwrap()["streamSettings"]["kcpSettings"]["seed"], "abc");
-        let t = parse_link("vless://u@example.com:80?type=tcp&headerType=http&host=a.com&path=%2F#t").unwrap();
+        let t = parse_link("vless://u@10.0.0.1:80?type=tcp&headerType=http&host=a.com&path=%2F#t").unwrap();
         assert_eq!(t.xray.unwrap()["streamSettings"]["tcpSettings"]["header"]["type"], "http");
         assert!(parse_link("vless://u@example.com:443?type=grpc&serviceName=s&security=tls#g").unwrap().xray.is_none());
+    }
+
+    /// Runs `xray run -test` on the generated outbounds when the binary is available (skipped otherwise).
+    #[test]
+    fn xray_outbounds_pass_xray_test() {
+        let bin = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("binaries").join(if cfg!(windows) { "xray.exe" } else { "xray" });
+        if !bin.exists() {
+            eprintln!("skipped: no xray binary");
+            return;
+        }
+        let links = [
+            "vless://u-u-i-d@example.com:443?security=tls&type=xhttp&path=%2Fx&host=h.example.com&mode=packet-up&sni=h.example.com&fp=chrome&extra=%7B%22xPaddingBytes%22%3A%22100-1000%22%7D#x",
+            "vless://u-u-i-d@example.com:443?security=reality&type=xhttp&sni=a.com&pbk=5Tk7h3m0wZ0yK1xQ2c8dR4vB6nJ9sL1aE3fG7uH0iMo&sid=ab&fp=chrome&path=%2F#r",
+            "vless://83baf1d4-f357-4baf-872f-d60f6c2c14fa@10.0.0.1:443?type=kcp&headerType=none&seed=abc#k",
+            "vless://83baf1d4-f357-4baf-872f-d60f6c2c14fa@10.0.0.1:80?type=tcp&headerType=http&host=a.com&path=%2F#t",
+            "trojan://pw@example.com:443?type=xhttp&security=tls&path=%2F#tr",
+        ];
+        for l in links {
+            let n = parse_link(l).unwrap();
+            let mut ob = n.xray.clone().unwrap();
+            ob["tag"] = json!("o");
+            let cfg = json!({ "outbounds": [ob] });
+            let path = std::env::temp_dir().join("vanish-xray-check.json");
+            std::fs::write(&path, serde_json::to_vec(&cfg).unwrap()).unwrap();
+            let out = std::process::Command::new(&bin).args(["run", "-test", "-c"]).arg(&path).output().unwrap();
+            assert!(out.status.success(), "{l}: {}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        }
     }
 }
