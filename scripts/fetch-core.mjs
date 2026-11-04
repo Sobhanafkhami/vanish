@@ -17,7 +17,11 @@ const arch = process.arch === "arm64" ? "arm64" : "amd64";
 
 // curl honours the system proxy/IPv4 fallback better than Node's built-in fetch.
 const curl_ = (u, dest) => execFileSync(win ? join(process.env.SystemRoot, "System32", "curl.exe") : "curl", ["-fL", "-sS", "--retry", "3", "-o", dest, u], { stdio: "inherit" });
-const untar = (archive, dir) => execFileSync(win ? join(process.env.SystemRoot, "System32", "tar.exe") : "tar", ["-xf", archive, "-C", dir], { stdio: "inherit" }); // bsdtar/GNU tar handle zip and tar.gz
+// Windows' bsdtar reads zip and tar.gz; GNU tar (Linux runners) only reads tar.gz, so zips go through unzip there.
+const untar = (archive, dir) =>
+  !win && archive.endsWith(".zip")
+    ? execFileSync("unzip", ["-o", "-q", archive, "-d", dir], { stdio: "inherit" })
+    : execFileSync(win ? join(process.env.SystemRoot, "System32", "tar.exe") : "tar", ["-xf", archive, "-C", dir], { stdio: "inherit" });
 const scratch = () => {
   const dir = join(tmpdir(), `vanish-core-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
   mkdirSync(dir, { recursive: true });
