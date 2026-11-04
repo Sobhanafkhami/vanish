@@ -73,6 +73,14 @@ fn emit_state(app: &AppHandle) {
 }
 
 pub async fn start(app: &AppHandle) -> Result<CoreStatus, String> {
+    let result = start_inner(app).await;
+    if result.is_err() {
+        crate::xray::stop(&app.state::<AppState>()).await;
+    }
+    result
+}
+
+async fn start_inner(app: &AppHandle) -> Result<CoreStatus, String> {
     let state = app.state::<AppState>();
     let mut child_slot = state.child.lock().await;
     if child_slot.is_some() || state.active_node.lock().unwrap().is_some() {
@@ -100,10 +108,32 @@ pub async fn start(app: &AppHandle) -> Result<CoreStatus, String> {
         nodes.iter().find(|n| n.id == id).cloned().ok_or("selected node no longer exists")?
     };
 
+    // XHTTP, mKCP and friends are carried by Xray; sing-box reaches it over a local SOCKS port. On Android the
+    // single in-process core also carries every other node for the delay test, so Xray serves all of them.
+    crate::xray::stop(&state).await;
+    let wanted: Vec<crate::nodes::Node> = if cfg!(target_os = "android") { state.nodes.lock().unwrap().clone() } else { vec![node.clone()] };
+    let (xray_ports, xray_ips) = match crate::xray::start(app, &wanted).await {
+        Ok(Some(running)) => {
+            let ports = running.ports.clone();
+            let ips = running.server_ips.clone();
+            *state.xray.lock().await = Some(running);
+            (ports, ips)
+        }
+        Ok(None) => Default::default(),
+        // Another node's broken Xray config must not stop a node that does not use Xray.
+        Err(e) if node.xray.is_none() => {
+            let _ = app.emit("core-log", format!("xray: {e}"));
+            Default::default()
+        }
+        Err(e) => return Err(e),
+    };
+
     let cfg_path = state.data_dir.join("config.json");
     #[cfg(not(target_os = "android"))]
     {
-        let cfg = serde_json::to_vec_pretty(&config::build(&node, &settings)).map_err(|e| e.to_string())?;
+        let mut cfg = config::build(&node, &settings, &xray_ports);
+        config::bypass_ips(&mut cfg, &xray_ips);
+        let cfg = serde_json::to_vec_pretty(&cfg).map_err(|e| e.to_string())?;
         std::fs::write(&cfg_path, cfg).map_err(|e| e.to_string())?;
     }
 
@@ -113,8 +143,9 @@ pub async fn start(app: &AppHandle) -> Result<CoreStatus, String> {
         // so a failed start is retried once with just the selected node.
         let all_nodes = state.nodes.lock().unwrap().clone();
         let write = |probes: Option<&[crate::nodes::Node]>| -> Result<(), String> {
-            let mut cfg = config::build(&node, &settings);
-            config::android_extras(&mut cfg, &state.data_dir, probes);
+            let mut cfg = config::build(&node, &settings, &xray_ports);
+            config::bypass_ips(&mut cfg, &xray_ips);
+            config::android_extras(&mut cfg, &state.data_dir, probes, &xray_ports);
             std::fs::write(&cfg_path, serde_json::to_vec_pretty(&cfg).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
         };
         let _ = std::fs::remove_file(state.data_dir.join("core.log"));
@@ -228,6 +259,7 @@ pub async fn stop(app: &AppHandle) -> Result<CoreStatus, String> {
     if let Some(mut child) = state.child.lock().await.take() {
         let _ = child.kill().await;
     }
+    crate::xray::stop(&state).await;
     *state.active_node.lock().unwrap() = None;
     let _ = state.save_nodes(); // persist the usage counters
     emit_state(app);
@@ -386,6 +418,7 @@ async fn watchdog(app: AppHandle, generation: u64, node_id: String) {
             slot.as_mut().is_some_and(|c| matches!(c.try_wait(), Ok(Some(_)))) && slot.take().is_some()
         };
         if exited {
+            crate::xray::stop(&state).await;
             if let Some(t) = state.traffic_task.lock().unwrap().take() {
                 t.abort();
             }

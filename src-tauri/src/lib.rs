@@ -14,6 +14,7 @@ mod updater;
 mod usage;
 #[cfg(target_os = "android")]
 mod vpn;
+mod xray;
 
 use tauri::Manager;
 #[cfg(desktop)]

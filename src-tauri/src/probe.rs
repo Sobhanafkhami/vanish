@@ -1,8 +1,9 @@
 //! "Real delay" test (like URL test in Nekoray): a throw-away headless sing-box holds every node as an
 //! outbound and the Clash API's delay endpoint makes a real HTTP(S) request through each one.
+//! Nodes that sing-box cannot dial (XHTTP, mKCP, ...) sit behind a short-lived Xray process, see `crate::xray`.
 
 use std::{
-    process::Stdio,
+    collections::HashMap,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -12,9 +13,9 @@ use std::{
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
-use tokio::{process::Command, sync::Semaphore, time::sleep};
+use tokio::{sync::Semaphore, time::sleep};
 
-use crate::{config, engine, nodes::Node, state::AppState};
+use crate::{config, nodes::Node, state::AppState};
 
 static RUNNING: AtomicBool = AtomicBool::new(false);
 
@@ -33,6 +34,10 @@ impl Drop for Guard {
 }
 
 pub async fn real_delay(app: &AppHandle, ids: Vec<String>) -> Result<(), String> {
+    if RUNNING.swap(true, Ordering::SeqCst) {
+        return Err("a delay test is already running".into());
+    }
+    let _guard = Guard;
     // The probe starts its own sing-box process, which Android does not allow; libbox is a single in-process core.
     #[cfg(target_os = "android")]
     return real_delay_android(app, ids).await;
@@ -40,33 +45,113 @@ pub async fn real_delay(app: &AppHandle, ids: Vec<String>) -> Result<(), String>
     real_delay_desktop(app, ids).await
 }
 
+fn record(app: &AppHandle, id: String, delay: i32) {
+    let state = app.state::<AppState>();
+    if let Some(n) = state.nodes.lock().unwrap().iter_mut().find(|n| n.id == id) {
+        n.delay = Some(delay);
+    }
+    let _ = app.emit("node-delay", DelayEvent { id, delay });
+}
+
+/// One delay request through the Clash API; -1 on timeout or error.
+async fn delay_once(client: &reqwest::Client, api_port: u16, tag: &str, url: &str) -> i32 {
+    match client
+        .get(format!("http://127.0.0.1:{api_port}/proxies/{tag}/delay"))
+        .query(&[("url", url), ("timeout", "6000")])
+        .timeout(Duration::from_secs(9))
+        .send()
+        .await
+    {
+        Ok(r) if r.status().is_success() => r.json::<serde_json::Value>().await.ok().and_then(|v| v["delay"].as_i64()).map_or(-1, |d| d as i32),
+        _ => -1,
+    }
+}
+
+/// The Clash API opens a brand-new connection for every request, so one measurement carries everything that
+/// happens once per connection: resolving the server, TCP slow start, the transport handshake and the first
+/// TLS flight. A single cold sample is also at the mercy of one lost packet, which is how a healthy server ends
+/// up as "timeout" here and 150 ms in v2rayNG. Two attempts, the better one reported, give the steady figure
+/// those clients show (and a failed first try gets its second chance).
+async fn measure(client: &reqwest::Client, api_port: u16, tag: &str, url: &str) -> i32 {
+    let first = delay_once(client, api_port, tag, url).await;
+    let second = delay_once(client, api_port, tag, url).await;
+    match (first, second) {
+        (a, b) if a >= 0 && b >= 0 => a.min(b),
+        (a, _) if a >= 0 => a,
+        (_, b) => b,
+    }
+}
+
+/// Times every `(node id, outbound tag)` pair with bounded concurrency (hundreds of simultaneous handshakes
+/// would skew the numbers) and publishes each result as it lands.
+async fn run_delays(app: &AppHandle, client: &reqwest::Client, api_port: u16, tags: Vec<(String, String)>, url: &str, concurrency: usize) {
+    let gate = Arc::new(Semaphore::new(concurrency));
+    let handles: Vec<_> = tags
+        .into_iter()
+        .map(|(id, tag)| {
+            let (client, gate, app, url) = (client.clone(), gate.clone(), app.clone(), url.to_string());
+            tauri::async_runtime::spawn(async move {
+                let _permit = gate.acquire().await;
+                let delay = measure(&client, api_port, &tag, &url).await;
+                record(&app, id, delay);
+            })
+        })
+        .collect();
+    for h in handles {
+        let _ = h.await;
+    }
+}
+
+/// Starts Xray for the Xray-only targets. When it cannot start those nodes are reported as failed and dropped.
+async fn xray_for(app: &AppHandle, targets: &mut Vec<Node>) -> Option<crate::xray::Running> {
+    match crate::xray::start(app, targets).await {
+        Ok(running) => running,
+        Err(e) => {
+            let _ = app.emit("core-log", format!("xray: {e}"));
+            let (broken, ok): (Vec<Node>, Vec<Node>) = std::mem::take(targets).into_iter().partition(|n| n.xray.is_some());
+            for n in broken {
+                record(app, n.id, -1);
+            }
+            *targets = ok;
+            None
+        }
+    }
+}
+
 /// Android: times every node through the Clash API of an in-process core.
 /// Connected: the running core carries every node as `p-<id>` (see `config::android_extras`).
 /// Not connected: a short-lived headless core is started just for the test (no VPN, no permission prompt).
 #[cfg(target_os = "android")]
 async fn real_delay_android(app: &AppHandle, ids: Vec<String>) -> Result<(), String> {
-    if RUNNING.swap(true, Ordering::SeqCst) {
-        return Err("a delay test is already running".into());
-    }
-    let _guard = Guard;
+    use crate::engine;
     let state = app.state::<AppState>();
     let test_url = state.settings.lock().unwrap().ping_url.clone();
     let client = reqwest::Client::builder().no_proxy().build().map_err(|e| e.to_string())?;
 
     // (api port, tag per node id)
     let connected = state.active_node.lock().unwrap().is_some();
-    let (api_port, tags): (u16, Vec<(String, String)>) = if connected {
-        (state.active_ports.lock().unwrap().1, ids.iter().map(|id| (id.clone(), format!("p-{id}"))).collect())
+    let (api_port, tags, probe_xray): (u16, Vec<(String, String)>, Option<crate::xray::Running>) = if connected {
+        (state.active_ports.lock().unwrap().1, ids.iter().map(|id| (id.clone(), format!("p-{id}"))).collect(), None)
     } else {
-        let targets: Vec<Node> = state.nodes.lock().unwrap().iter().filter(|n| ids.contains(&n.id)).cloned().collect();
+        let mut targets: Vec<Node> = state.nodes.lock().unwrap().iter().filter(|n| ids.contains(&n.id)).cloned().collect();
         if targets.is_empty() {
             return Ok(());
         }
+        let xray = xray_for(app, &mut targets).await;
+        if targets.is_empty() {
+            return state.save_nodes();
+        }
+        let ports = xray.as_ref().map(|x| x.ports.clone()).unwrap_or_default();
         let api_port = engine::free_port(19190, None);
         let refs: Vec<&Node> = targets.iter().collect();
         let path = state.data_dir.join("probe.json");
-        std::fs::write(&path, serde_json::to_vec(&config::probe(&refs, api_port)).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
-        crate::vpn::start(app, &path, true).await?;
+        std::fs::write(&path, serde_json::to_vec(&config::probe(&refs, api_port, &ports)).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+        if let Err(e) = crate::vpn::start(app, &path, true).await {
+            if let Some(x) = xray {
+                x.kill().await;
+            }
+            return Err(e);
+        }
 
         let mut ready = false;
         for _ in 0..80 {
@@ -76,62 +161,43 @@ async fn real_delay_android(app: &AppHandle, ids: Vec<String>) -> Result<(), Str
             }
             if let Some(err) = crate::vpn::status(app).await?.error {
                 let _ = crate::vpn::stop(app).await;
+                if let Some(x) = xray {
+                    x.kill().await;
+                }
                 return Err(format!("core exited:\n{err}"));
             }
             sleep(Duration::from_millis(250)).await;
         }
         if !ready {
             let _ = crate::vpn::stop(app).await;
+            if let Some(x) = xray {
+                x.kill().await;
+            }
             return Err("probe core did not become ready".into());
         }
-        (api_port, targets.iter().enumerate().map(|(i, n)| (n.id.clone(), format!("n{i}"))).collect())
+        (api_port, targets.iter().enumerate().map(|(i, n)| (n.id.clone(), format!("n{i}"))).collect(), xray)
     };
 
-    let gate = Arc::new(Semaphore::new(6));
-    let handles: Vec<_> = tags
-        .into_iter()
-        .map(|(id, tag)| {
-            let (client, gate, app, url) = (client.clone(), gate.clone(), app.clone(), test_url.clone());
-            tauri::async_runtime::spawn(async move {
-                let _permit = gate.acquire().await;
-                let delay = match client
-                    .get(format!("http://127.0.0.1:{api_port}/proxies/{tag}/delay"))
-                    .query(&[("url", url.as_str()), ("timeout", "6000")])
-                    .timeout(Duration::from_secs(9))
-                    .send()
-                    .await
-                {
-                    Ok(r) if r.status().is_success() => {
-                        r.json::<serde_json::Value>().await.ok().and_then(|v| v["delay"].as_i64()).map_or(-1, |d| d as i32)
-                    }
-                    _ => -1,
-                };
-                let state = app.state::<AppState>();
-                if let Some(n) = state.nodes.lock().unwrap().iter_mut().find(|n| n.id == id) {
-                    n.delay = Some(delay);
-                }
-                let _ = app.emit("node-delay", DelayEvent { id, delay });
-            })
-        })
-        .collect();
-    for h in handles {
-        let _ = h.await;
-    }
+    run_delays(app, &client, api_port, tags, &test_url, 6).await;
     if !connected {
         let _ = crate::vpn::stop(app).await;
+    }
+    if let Some(x) = probe_xray {
+        x.kill().await;
     }
     state.save_nodes()
 }
 
 #[cfg(not(target_os = "android"))]
 async fn real_delay_desktop(app: &AppHandle, ids: Vec<String>) -> Result<(), String> {
-    if RUNNING.swap(true, Ordering::SeqCst) {
-        return Err("a delay test is already running".into());
-    }
-    let _guard = Guard;
+    use std::process::Stdio;
+    use tokio::process::Command;
+
+    use crate::engine;
+
     let state = app.state::<AppState>();
 
-    let targets: Vec<Node> = state.nodes.lock().unwrap().iter().filter(|n| ids.contains(&n.id)).cloned().collect();
+    let mut targets: Vec<Node> = state.nodes.lock().unwrap().iter().filter(|n| ids.contains(&n.id)).cloned().collect();
     if targets.is_empty() {
         return Ok(());
     }
@@ -139,12 +205,22 @@ async fn real_delay_desktop(app: &AppHandle, ids: Vec<String>) -> Result<(), Str
         let url = state.settings.lock().unwrap().ping_url.clone();
         (url, engine::resolve_binary(app, &state))
     };
+    let xray = xray_for(app, &mut targets).await;
+    if targets.is_empty() {
+        return state.save_nodes();
+    }
+    let ports: HashMap<String, u16> = xray.as_ref().map(|x| x.ports.clone()).unwrap_or_default();
+    let kill_xray = |x: Option<crate::xray::Running>| async move {
+        if let Some(x) = x {
+            x.kill().await;
+        }
+    };
 
     let dir = state.data_dir.join("probe");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let api_port = engine::free_port(19190, None);
     let refs: Vec<&Node> = targets.iter().collect();
-    std::fs::write(dir.join("config.json"), serde_json::to_vec(&config::probe(&refs, api_port)).map_err(|e| e.to_string())?)
+    std::fs::write(dir.join("config.json"), serde_json::to_vec(&config::probe(&refs, api_port, &ports)).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())?;
     let log_path = dir.join("core.log");
     let log = std::fs::File::create(&log_path).map_err(|e| e.to_string())?;
@@ -159,7 +235,13 @@ async fn real_delay_desktop(app: &AppHandle, ids: Vec<String>) -> Result<(), Str
         .kill_on_drop(true);
     #[cfg(windows)]
     cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-    let mut child = cmd.spawn().map_err(|e| format!("cannot start {}: {e}", bin.display()))?;
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            kill_xray(xray).await;
+            return Err(format!("cannot start {}: {e}", bin.display()));
+        }
+    };
 
     let client = reqwest::Client::builder().no_proxy().build().map_err(|e| e.to_string())?;
     let base = format!("http://127.0.0.1:{api_port}");
@@ -168,6 +250,7 @@ async fn real_delay_desktop(app: &AppHandle, ids: Vec<String>) -> Result<(), Str
         if let Ok(Some(_)) = child.try_wait() {
             let tail = std::fs::read_to_string(&log_path).unwrap_or_default();
             let tail: Vec<&str> = tail.lines().rev().take(3).collect();
+            kill_xray(xray).await;
             return Err(format!("probe core exited: {}", tail.into_iter().rev().collect::<Vec<_>>().join(" | ")));
         }
         if client.get(format!("{base}/version")).timeout(Duration::from_millis(300)).send().await.is_ok() {
@@ -178,46 +261,13 @@ async fn real_delay_desktop(app: &AppHandle, ids: Vec<String>) -> Result<(), Str
     }
     if !ready {
         let _ = child.kill().await;
+        kill_xray(xray).await;
         return Err("probe core did not become ready".into());
     }
 
-    // Bounded concurrency: hundreds of simultaneous TLS handshakes would skew the numbers.
-    let gate = Arc::new(Semaphore::new(8));
-    let handles: Vec<_> = targets
-        .iter()
-        .enumerate()
-        .map(|(i, n)| {
-            let (client, base, url, gate, id) = (client.clone(), base.clone(), test_url.clone(), gate.clone(), n.id.clone());
-            let app = app.clone();
-            tauri::async_runtime::spawn(async move {
-                let _permit = gate.acquire().await;
-                let delay = match client
-                    .get(format!("{base}/proxies/n{i}/delay"))
-                    .query(&[("url", url.as_str()), ("timeout", "6000")])
-                    .timeout(Duration::from_secs(9))
-                    .send()
-                    .await
-                {
-                    Ok(r) if r.status().is_success() => r
-                        .json::<serde_json::Value>()
-                        .await
-                        .ok()
-                        .and_then(|v| v["delay"].as_i64())
-                        .map(|d| d as i32)
-                        .unwrap_or(-1),
-                    _ => -1,
-                };
-                let state = app.state::<AppState>();
-                if let Some(n) = state.nodes.lock().unwrap().iter_mut().find(|n| n.id == id) {
-                    n.delay = Some(delay);
-                }
-                let _ = app.emit("node-delay", DelayEvent { id, delay });
-            })
-        })
-        .collect();
-    for h in handles {
-        let _ = h.await;
-    }
+    let tags: Vec<(String, String)> = targets.iter().enumerate().map(|(i, n)| (n.id.clone(), format!("n{i}"))).collect();
+    run_delays(app, &client, api_port, tags, &test_url, 8).await;
     let _ = child.kill().await;
+    kill_xray(xray).await;
     state.save_nodes()
 }

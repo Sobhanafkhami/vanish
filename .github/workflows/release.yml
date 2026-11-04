@@ -157,6 +157,9 @@ jobs:
 
       - run: npm ci
 
+      - name: Download Xray (XHTTP / mKCP transports)
+        run: node scripts/fetch-core.mjs android
+
       - name: Prepare signing key
         env:
           KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}

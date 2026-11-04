@@ -70,6 +70,10 @@ android {
     buildFeatures {
         buildConfig = true
     }
+    packaging {
+        // libxray.so is an executable, not a library: it must be unpacked to the native library directory to run.
+        jniLibs.useLegacyPackaging = true
+    }
 }
 
 kotlin {

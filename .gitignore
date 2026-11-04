@@ -5,3 +5,4 @@ src-tauri/gen/schemas
 *.log
 .DS_Store
 src-tauri/binaries
+src-tauri/gen/android/app/src/main/jniLibs/

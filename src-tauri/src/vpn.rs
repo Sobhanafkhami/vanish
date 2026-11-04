@@ -96,3 +96,13 @@ pub async fn list_apps(app: &AppHandle) -> Result<Vec<AppEntry>, String> {
     let r: Apps = handle(app).0.run_mobile_plugin_async("listApps", json!({})).await.map_err(|e| e.to_string())?;
     Ok(r.apps)
 }
+
+/// Path of the Xray executable the APK ships as `libxray.so` (the only place Android lets an app run code from).
+pub async fn xray_path(app: &AppHandle) -> Result<String, String> {
+    #[derive(Deserialize)]
+    struct Reply {
+        path: String,
+    }
+    let r: Reply = handle(app).0.run_mobile_plugin_async("xrayPath", json!({})).await.map_err(|e| e.to_string())?;
+    Ok(r.path)
+}

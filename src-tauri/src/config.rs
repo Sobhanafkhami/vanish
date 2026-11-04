@@ -1,9 +1,12 @@
 //! Dynamic sing-box configuration (new-style DNS servers, route actions, WireGuard endpoint: sing-box >= 1.12, verified on 1.14).
 
+use std::collections::HashMap;
+
 use serde_json::{json, Value};
 
 use crate::{
     nodes::Node,
+    xray::outbound_for,
     state::{Mode, RouteMode, Settings},
 };
 
@@ -60,14 +63,33 @@ fn tune_outbound(ob: &mut Value, game: bool) {
     }
 }
 
-pub fn build(node: &Node, s: &Settings) -> Value {
+/// Resolves the proxy server's own name, preferring IPv4: a dead IPv6 route otherwise costs a fallback delay
+/// on every new connection (and shows up as a high or timed-out delay test).
+fn domain_resolver() -> Value {
+    json!({ "server": "local", "strategy": "prefer_ipv4" })
+}
+
+/// Lets the Xray process (and anything else dialing these addresses) leave directly instead of re-entering the
+/// tunnel that is waiting for its traffic.
+pub fn bypass_ips(cfg: &mut Value, ips: &[String]) {
+    if ips.is_empty() {
+        return;
+    }
+    let cidrs: Vec<String> = ips.iter().map(|ip| if ip.contains(':') { format!("{ip}/128") } else { format!("{ip}/32") }).collect();
+    if let Some(rules) = cfg["route"]["rules"].as_array_mut() {
+        rules.insert(0, json!({ "ip_cidr": cidrs, "outbound": "direct" }));
+    }
+}
+
+/// `xray`: node id -> local SOCKS port of the Xray process that carries it (see `crate::xray`).
+pub fn build(node: &Node, s: &Settings, xray: &HashMap<String, u16>) -> Value {
     let game = s.game_mode;
     let mut outbounds = vec![json!({ "type": "direct", "tag": "direct" })];
     let mut endpoints: Vec<Value> = vec![];
     if node.outbound["type"] == "wireguard" {
         endpoints.push(wireguard_endpoint(&node.outbound, "proxy"));
     } else {
-        let mut outbound = node.outbound.clone();
+        let mut outbound = outbound_for(node, xray);
         outbound["tag"] = json!("proxy");
         tune_outbound(&mut outbound, game);
         outbounds.insert(0, outbound);
@@ -159,7 +181,7 @@ pub fn build(node: &Node, s: &Settings) -> Value {
             "final": if route_final_direct { "direct" } else { "proxy" },
             "auto_detect_interface": true,
             // Resolves the proxy server's own hostname without going through the tunnel.
-            "default_domain_resolver": "local",
+            "default_domain_resolver": domain_resolver(),
         },
         "experimental": {
             "clash_api": { "external_controller": format!("127.0.0.1:{}", s.api_port) }
@@ -176,7 +198,7 @@ pub fn build(node: &Node, s: &Settings) -> Value {
 /// config carries every node as an extra outbound (`p-<id>`) that the Clash API can delay-test, and the core
 /// writes its log to a file the app tails into the Core log view.
 #[cfg(target_os = "android")]
-pub fn android_extras(cfg: &mut Value, data_dir: &std::path::Path, probes: Option<&[Node]>) {
+pub fn android_extras(cfg: &mut Value, data_dir: &std::path::Path, probes: Option<&[Node]>, xray: &HashMap<String, u16>) {
     cfg["log"]["output"] = json!(data_dir.join("core.log").to_string_lossy());
     let Some(nodes) = probes else { return };
     for node in nodes.iter().take(400) {
@@ -186,7 +208,7 @@ pub fn android_extras(cfg: &mut Value, data_dir: &std::path::Path, probes: Optio
                 list.push(wireguard_endpoint(&node.outbound, &tag));
             }
         } else {
-            let mut ob = node.outbound.clone();
+            let mut ob = outbound_for(node, xray);
             ob["tag"] = json!(tag);
             tune_outbound(&mut ob, false);
             if let Some(list) = cfg["outbounds"].as_array_mut() {
@@ -198,7 +220,7 @@ pub fn android_extras(cfg: &mut Value, data_dir: &std::path::Path, probes: Optio
 
 /// Headless config for the real-delay probe: every node as its own outbound (`n0`, `n1`, ...) plus the
 /// Clash API, no inbounds. Delay checks are made through that API, one per node.
-pub fn probe(nodes: &[&Node], api_port: u16) -> Value {
+pub fn probe(nodes: &[&Node], api_port: u16, xray: &HashMap<String, u16>) -> Value {
     let mut outbounds = vec![json!({ "type": "direct", "tag": "direct" })];
     let mut endpoints: Vec<Value> = vec![];
     for (i, node) in nodes.iter().enumerate() {
@@ -206,7 +228,7 @@ pub fn probe(nodes: &[&Node], api_port: u16) -> Value {
         if node.outbound["type"] == "wireguard" {
             endpoints.push(wireguard_endpoint(&node.outbound, &tag));
         } else {
-            let mut ob = node.outbound.clone();
+            let mut ob = outbound_for(node, xray);
             ob["tag"] = json!(tag);
             tune_outbound(&mut ob, false);
             outbounds.push(ob);
@@ -217,7 +239,7 @@ pub fn probe(nodes: &[&Node], api_port: u16) -> Value {
         "dns": { "servers": [{ "type": "local", "tag": "local" }] },
         "outbounds": outbounds,
         "endpoints": endpoints,
-        "route": { "final": "direct", "auto_detect_interface": true, "default_domain_resolver": "local" },
+        "route": { "final": "direct", "auto_detect_interface": true, "default_domain_resolver": domain_resolver() },
         "experimental": { "clash_api": { "external_controller": format!("127.0.0.1:{api_port}") } }
     })
 }
@@ -253,7 +275,7 @@ mod tests {
                     ..Settings::default()
                 };
                 let path = std::env::temp_dir().join("vanish-check.json");
-                std::fs::write(&path, serde_json::to_vec(&build(&node, &settings)).unwrap()).unwrap();
+                std::fs::write(&path, serde_json::to_vec(&build(&node, &settings, &HashMap::new())).unwrap()).unwrap();
                 let out = std::process::Command::new(&bin).args(["check", "-c"]).arg(&path).output().unwrap();
                 assert!(out.status.success(), "{l}: {}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
             }
@@ -265,7 +287,7 @@ mod tests {
             for apps in [vec![], vec!["game.exe".to_string()]] {
                 let settings = Settings { mode: Mode::Tun, game_mode: true, game_apps: apps, ..Settings::default() };
                 let path = std::env::temp_dir().join("vanish-check-game.json");
-                std::fs::write(&path, serde_json::to_vec(&build(&node, &settings)).unwrap()).unwrap();
+                std::fs::write(&path, serde_json::to_vec(&build(&node, &settings, &HashMap::new())).unwrap()).unwrap();
                 let out = std::process::Command::new(&bin).args(["check", "-c"]).arg(&path).output().unwrap();
                 assert!(out.status.success(), "game {l}: {}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
             }
@@ -275,7 +297,7 @@ mod tests {
         let nodes: Vec<Node> = links.iter().map(|l| parse_link(l).unwrap()).collect();
         let refs: Vec<&Node> = nodes.iter().collect();
         let path = std::env::temp_dir().join("vanish-probe-check.json");
-        std::fs::write(&path, serde_json::to_vec(&probe(&refs, 19999)).unwrap()).unwrap();
+        std::fs::write(&path, serde_json::to_vec(&probe(&refs, 19999, &HashMap::new())).unwrap()).unwrap();
         let out = std::process::Command::new(&bin).args(["check", "-c"]).arg(&path).output().unwrap();
         assert!(out.status.success(), "probe: {}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
     }

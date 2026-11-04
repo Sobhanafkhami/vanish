@@ -106,6 +106,8 @@ pub struct AppState {
     pub subs: Mutex<Vec<Subscription>>,
     pub settings: Mutex<Settings>,
     pub child: tokio::sync::Mutex<Option<Child>>,
+    /// Xray process carrying the connected node (and, on Android, every Xray node for the delay test).
+    pub xray: tokio::sync::Mutex<Option<crate::xray::Running>>,
     pub traffic_task: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
     pub active_node: Mutex<Option<String>>,
     /// (mixed, api) ports of the running core; may differ from settings if those were busy.
@@ -189,6 +191,7 @@ impl AppState {
             subs: Mutex::new(subs),
             settings: Mutex::new(settings),
             child: tokio::sync::Mutex::new(None),
+            xray: tokio::sync::Mutex::new(None),
             traffic_task: Mutex::new(None),
             active_node: Mutex::new(None),
             active_ports: Mutex::new((0, 0)),

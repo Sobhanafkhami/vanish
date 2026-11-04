@@ -34,6 +34,10 @@ pub struct Node {
     /// Real HTTP delay in ms; -1 = test failed, None = never tested.
     #[serde(default)]
     pub delay: Option<i32>,
+    /// Xray outbound for links whose transport sing-box cannot dial (XHTTP, mKCP, TCP HTTP-header, VLESS
+    /// encryption). `outbound` stays the closest sing-box equivalent for display; connections go through Xray.
+    #[serde(default)]
+    pub xray: Option<Value>,
 }
 
 type Query = HashMap<String, String>;
@@ -66,26 +70,49 @@ fn node_from_outbound(name: String, outbound: Value) -> Result<Node, String> {
         up_total: 0,
         down_total: 0,
         delay: None,
+        xray: None,
     })
 }
 
+fn nonempty<'a>(q: &'a Query, key: &str) -> Option<&'a str> {
+    q.get(key).map(String::as_str).filter(|s| !s.is_empty())
+}
+
+fn net_type(q: &Query) -> &str {
+    match nonempty(q, "type").unwrap_or("tcp") {
+        "raw" => "tcp",
+        "mkcp" => "kcp",
+        "splithttp" => "xhttp",
+        "h2" => "http",
+        other => other,
+    }
+}
+
 fn tls_from(q: &Query, server: &str, default_tls: bool) -> Option<Value> {
-    let sec = q
-        .get("security")
-        .map(String::as_str)
-        .unwrap_or(if default_tls { "tls" } else { "none" });
-    if sec == "none" || sec.is_empty() {
+    let sec = nonempty(q, "security").unwrap_or(if default_tls { "tls" } else { "none" });
+    if sec == "none" {
         return None;
     }
-    let sni = q.get("sni").or(q.get("peer")).or(q.get("host")).cloned().unwrap_or_else(|| server.to_string());
+    // An empty `sni=` (common in vmess:// links) must fall back to the Host header, then the server, like v2rayNG.
+    let sni = nonempty(q, "sni").or(nonempty(q, "peer")).or(nonempty(q, "host")).unwrap_or(server);
     let mut tls = json!({ "enabled": true, "server_name": sni });
     if matches!(q.get("allowInsecure").or(q.get("insecure")).map(String::as_str), Some("1" | "true")) {
         tls["insecure"] = json!(true);
     }
-    if let Some(alpn) = q.get("alpn").filter(|s| !s.is_empty()) {
-        tls["alpn"] = json!(alpn.split(',').collect::<Vec<_>>());
+    // Without an explicit ALPN a Chrome-like hello offers h2, a CDN picks it, and a WebSocket upgrade then
+    // never completes (a timeout in the delay test). Xray-based clients pin the ALPN per transport.
+    let alpn: Vec<&str> = match nonempty(q, "alpn") {
+        Some(a) => a.split(',').map(str::trim).filter(|s| !s.is_empty()).collect(),
+        None => match net_type(q) {
+            "ws" | "httpupgrade" => vec!["http/1.1"],
+            "grpc" | "http" => vec!["h2"],
+            _ => vec![],
+        },
+    };
+    if !alpn.is_empty() {
+        tls["alpn"] = json!(alpn);
     }
-    if let Some(fp) = q.get("fp").filter(|s| !s.is_empty()) {
+    if let Some(fp) = nonempty(q, "fp") {
         tls["utls"] = json!({ "enabled": true, "fingerprint": fp });
     }
     if sec == "reality" {
@@ -102,10 +129,10 @@ fn tls_from(q: &Query, server: &str, default_tls: bool) -> Option<Value> {
 }
 
 fn transport_from(q: &Query) -> Option<Value> {
-    let t = q.get("type").map(String::as_str).unwrap_or("tcp");
-    let path = q.get("path").cloned().unwrap_or_else(|| "/".into());
-    let host = q.get("host").filter(|s| !s.is_empty()).cloned();
-    match t {
+    let path = nonempty(q, "path").unwrap_or("/").to_string();
+    // Host header: explicit, else the TLS server name (what v2rayNG sends), else leave it to the dialer.
+    let host = nonempty(q, "host").or(nonempty(q, "sni")).map(str::to_string);
+    match net_type(q) {
         "ws" => {
             let mut v = json!({ "type": "ws", "path": path });
             if let Some(h) = host {
@@ -117,7 +144,7 @@ fn transport_from(q: &Query) -> Option<Value> {
             "type": "grpc",
             "service_name": q.get("serviceName").cloned().unwrap_or_default(),
         })),
-        "http" | "h2" => {
+        "http" => {
             let mut v = json!({ "type": "http", "path": path });
             if let Some(h) = host {
                 v["host"] = json!(h.split(',').collect::<Vec<_>>());
@@ -131,8 +158,97 @@ fn transport_from(q: &Query) -> Option<Value> {
             }
             Some(v)
         }
+        "quic" => Some(json!({ "type": "quic" })),
         _ => None,
     }
+}
+
+/// True when sing-box has no client for what the link asks for and Xray must carry it.
+fn needs_xray(q: &Query) -> bool {
+    let encrypted = nonempty(q, "encryption").is_some_and(|e| e != "none");
+    matches!(net_type(q), "xhttp" | "kcp") || (net_type(q) == "tcp" && nonempty(q, "headerType") == Some("http")) || encrypted
+}
+
+/// Xray `streamSettings` for a link's query.
+fn xray_stream(q: &Query, server: &str) -> Value {
+    let net = net_type(q);
+    let sec = nonempty(q, "security").unwrap_or("none");
+    let host = nonempty(q, "host");
+    let path = nonempty(q, "path").unwrap_or("/");
+    let mut s = json!({ "network": net, "security": sec });
+    let sni = nonempty(q, "sni").or(nonempty(q, "peer")).or(host).unwrap_or(server);
+    let alpn: Vec<&str> = nonempty(q, "alpn").map(|a| a.split(',').map(str::trim).filter(|x| !x.is_empty()).collect()).unwrap_or_default();
+    match sec {
+        "tls" => {
+            let mut t = json!({ "serverName": sni });
+            if !alpn.is_empty() {
+                t["alpn"] = json!(alpn);
+            }
+            if let Some(fp) = nonempty(q, "fp") {
+                t["fingerprint"] = json!(fp);
+            }
+            if matches!(q.get("allowInsecure").or(q.get("insecure")).map(String::as_str), Some("1" | "true")) {
+                t["allowInsecure"] = json!(true);
+            }
+            s["tlsSettings"] = t;
+        }
+        "reality" => {
+            s["realitySettings"] = json!({
+                "serverName": sni,
+                "fingerprint": nonempty(q, "fp").unwrap_or("chrome"),
+                "publicKey": q.get("pbk").cloned().unwrap_or_default(),
+                "shortId": q.get("sid").cloned().unwrap_or_default(),
+                "spiderX": q.get("spx").cloned().unwrap_or_default(),
+            });
+        }
+        _ => {}
+    }
+    match net {
+        "xhttp" => {
+            let mut x = json!({ "path": path, "host": host.unwrap_or(sni) });
+            if let Some(m) = nonempty(q, "mode") {
+                x["mode"] = json!(m);
+            }
+            if let Some(extra) = nonempty(q, "extra").and_then(|e| serde_json::from_str::<Value>(e).ok()) {
+                x["extra"] = extra;
+            }
+            s["xhttpSettings"] = x;
+        }
+        "kcp" => {
+            let mut k = json!({ "header": { "type": nonempty(q, "headerType").unwrap_or("none") } });
+            if let Some(seed) = nonempty(q, "seed") {
+                k["seed"] = json!(seed);
+            }
+            s["kcpSettings"] = k;
+        }
+        "tcp" if nonempty(q, "headerType") == Some("http") => {
+            let hosts: Vec<&str> = host.map(|h| h.split(',').collect()).unwrap_or_default();
+            s["tcpSettings"] = json!({ "header": { "type": "http", "request": {
+                "path": path.split(',').collect::<Vec<_>>(),
+                "headers": { "Host": hosts },
+            } } });
+        }
+        "ws" => {
+            s["wsSettings"] = json!({ "path": path, "host": host.unwrap_or(sni) });
+        }
+        "grpc" => {
+            s["grpcSettings"] = json!({ "serviceName": q.get("serviceName").cloned().unwrap_or_default() });
+        }
+        "httpupgrade" => {
+            s["httpupgradeSettings"] = json!({ "path": path, "host": host.unwrap_or(sni) });
+        }
+        _ => {}
+    }
+    s
+}
+
+/// Xray outbound for `proto` (`vless` / `vmess` / `trojan`); `user` is the protocol-specific account object.
+fn xray_outbound(proto: &str, server: &str, port: u16, user: Value, q: &Query) -> Value {
+    let settings = match proto {
+        "trojan" => json!({ "servers": [{ "address": server, "port": port, "password": user["password"] }] }),
+        _ => json!({ "vnext": [{ "address": server, "port": port, "users": [user] }] }),
+    };
+    json!({ "protocol": proto, "settings": settings, "streamSettings": xray_stream(q, server) })
 }
 
 fn split_url(link: &str) -> Result<(Url, String, u16, Query, String), String> {
@@ -158,7 +274,14 @@ fn parse_vless(link: &str) -> Result<Node, String> {
     if let Some(t) = transport_from(&q) {
         ob["transport"] = t;
     }
-    node_from_outbound(name, ob)
+    let xray = needs_xray(&q).then(|| {
+        let mut user = json!({ "id": pct(url.username()), "encryption": nonempty(&q, "encryption").unwrap_or("none") });
+        if let Some(flow) = nonempty(&q, "flow") {
+            user["flow"] = json!(flow);
+        }
+        xray_outbound("vless", &host, port, user, &q)
+    });
+    node_from_outbound(name, ob).map(|n| Node { xray, ..n })
 }
 
 fn parse_trojan(link: &str) -> Result<Node, String> {
@@ -172,7 +295,8 @@ fn parse_trojan(link: &str) -> Result<Node, String> {
     if let Some(t) = transport_from(&q) {
         ob["transport"] = t;
     }
-    node_from_outbound(name, ob)
+    let xray = needs_xray(&q).then(|| xray_outbound("trojan", &host, port, json!({ "password": pct(url.username()) }), &q));
+    node_from_outbound(name, ob).map(|n| Node { xray, ..n })
 }
 
 fn parse_vmess(link: &str) -> Result<Node, String> {
@@ -191,6 +315,9 @@ fn parse_vmess(link: &str) -> Result<Node, String> {
     q.insert("sni".into(), s("sni"));
     q.insert("alpn".into(), s("alpn"));
     q.insert("fp".into(), s("fp"));
+    q.insert("headerType".into(), s("type"));
+    q.insert("mode".into(), s("mode"));
+    q.insert("extra".into(), s("extra"));
 
     let mut ob = json!({
         "type": "vmess", "server": server, "server_port": port, "uuid": s("id"),
@@ -203,7 +330,12 @@ fn parse_vmess(link: &str) -> Result<Node, String> {
     if let Some(t) = transport_from(&q) {
         ob["transport"] = t;
     }
-    node_from_outbound(s("ps"), ob)
+    let xray = needs_xray(&q).then(|| {
+        let user = json!({ "id": s("id"), "alterId": s("aid").parse::<u32>().unwrap_or(0),
+            "security": if s("scy").is_empty() { "auto".to_string() } else { s("scy") } });
+        xray_outbound("vmess", &server, port, user, &q)
+    });
+    node_from_outbound(s("ps"), ob).map(|n| Node { xray, ..n })
 }
 
 fn parse_ss(link: &str) -> Result<Node, String> {
@@ -357,5 +489,40 @@ mod tests {
         let (ok, err) = parse_text(&body);
         assert_eq!((ok.len(), err.len()), (2, 0), "{err:?}");
         assert_eq!(ok[0].server, "185.143.235.200");
+    }
+
+    #[test]
+    fn xhttp_goes_to_xray() {
+        let n = parse_link("vless://u-u-i-d@example.com:443?security=tls&type=xhttp&path=%2Fx&host=h.example.com&mode=packet-up&sni=h.example.com&fp=chrome&extra=%7B%22xPaddingBytes%22%3A%22100-1000%22%7D#x").unwrap();
+        let x = n.xray.expect("xhttp needs xray");
+        assert_eq!(x["streamSettings"]["network"], "xhttp");
+        assert_eq!(x["streamSettings"]["xhttpSettings"]["mode"], "packet-up");
+        assert_eq!(x["streamSettings"]["xhttpSettings"]["extra"]["xPaddingBytes"], "100-1000");
+        assert_eq!(x["streamSettings"]["tlsSettings"]["serverName"], "h.example.com");
+        assert_eq!(x["settings"]["vnext"][0]["users"][0]["id"], "u-u-i-d");
+    }
+
+    #[test]
+    fn ws_pins_alpn_and_falls_back_to_host_for_sni() {
+        let j = r#"{"v":"2","ps":"vm","add":"1.2.3.4","port":"443","id":"id1","aid":"0","net":"ws","host":"cdn.example.com","path":"/p","tls":"tls","sni":"","fp":"chrome"}"#;
+        let n = parse_link(&format!("vmess://{}", STANDARD.encode(j))).unwrap();
+        assert!(n.xray.is_none());
+        assert_eq!(n.outbound["tls"]["server_name"], "cdn.example.com");
+        assert_eq!(n.outbound["tls"]["alpn"][0], "http/1.1");
+    }
+
+    #[test]
+    fn ws_host_defaults_to_sni() {
+        let n = parse_link("vless://u@1.2.3.4:443?security=tls&type=ws&path=%2F&sni=a.example.com#w").unwrap();
+        assert_eq!(n.outbound["transport"]["headers"]["Host"], "a.example.com");
+    }
+
+    #[test]
+    fn kcp_and_tcp_http_header_go_to_xray() {
+        let k = parse_link("vless://u@example.com:443?type=kcp&headerType=wechat-video&seed=abc#k").unwrap();
+        assert_eq!(k.xray.unwrap()["streamSettings"]["kcpSettings"]["seed"], "abc");
+        let t = parse_link("vless://u@example.com:80?type=tcp&headerType=http&host=a.com&path=%2F#t").unwrap();
+        assert_eq!(t.xray.unwrap()["streamSettings"]["tcpSettings"]["header"]["type"], "http");
+        assert!(parse_link("vless://u@example.com:443?type=grpc&serviceName=s&security=tls#g").unwrap().xray.is_none());
     }
 }

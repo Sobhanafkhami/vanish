@@ -74,6 +74,12 @@ class VpnPlugin(private val activity: Activity) : Plugin(activity) {
         invoke.resolve()
     }
 
+    /** Where the installer unpacked the bundled Xray executable (it is shipped as libxray.so). */
+    @Command
+    fun xrayPath(invoke: Invoke) {
+        invoke.resolve(JSObject().put("path", File(activity.applicationInfo.nativeLibraryDir, "libxray.so").path))
+    }
+
     @Command
     fun status(invoke: Invoke) {
         val result = JSObject().put("running", VanishVpnService.running)
